@@ -1,0 +1,192 @@
+name: Build IPA
+
+# Manually-triggered build of the CURRENT MeloLightning source into an
+# UNSIGNED iOS/iPadOS .ipa for sideloading (used to test the Task 1
+# Skylanders .sky persistence fix). No Apple signing, no secrets.
+#
+# Pipeline (mirrors how the repo's own iOS app is assembled):
+#   1. CMake (Xcode generator, CMAKE_SYSTEM_NAME=iOS, BUILD_HEADLESS_DYLIB=ON)
+#      generates build/src/cemuMain.xcodeproj with the CemuBin (-> Cemu.framework)
+#      and CemuInput (-> libCemuInput.a) targets and installs the arm64-ios
+#      vcpkg dependencies.
+#   2. xcodebuild builds MeloCafe/MeloCafe.xcodeproj (scheme "MeloCafe"), which
+#      references that generated project, builds/links Cemu.framework +
+#      libCemuInput.a, and produces MeloCafe.app.
+#   3. The .app is wrapped as Payload/MeloCafe.app and zipped to MeloLightning.ipa.
+
+on:
+  workflow_dispatch:
+    inputs:
+      configuration:
+        description: "Xcode build configuration"
+        type: choice
+        default: Release
+        options: [Release, Debug]
+
+permissions:
+  contents: read
+
+jobs:
+  build-ipa:
+    # Xcode 26 project (objectVersion 77, CreatedOnToolsVersion 26.2) -> needs
+    # a runner image that ships Xcode 26. macos-26 is the current image for that.
+    runs-on: macos-26
+
+    env:
+      CONFIG: ${{ inputs.configuration || 'Release' }}
+      DERIVED: ${{ github.workspace }}/DerivedData
+      # Speed up repeat runs by caching compiled vcpkg ports in the GitHub
+      # Actions cache. Safe/no-op on the first run.
+      VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          # vcpkg submodule must be a full (non-shallow) clone; the repo's
+          # CMake unshallows it, but fetch full history to be safe.
+          fetch-depth: 0
+
+      # Exposes the two env vars vcpkg's x-gha binary cache backend needs.
+      - name: Enable vcpkg GitHub Actions binary cache
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - name: Select Xcode
+        run: |
+          set -euo pipefail
+          # Prefer an installed Xcode 26.x; fall back to latest available.
+          XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -n1 || true)
+          if [ -z "${XC}" ]; then XC=$(ls -d /Applications/Xcode*.app | sort -V | tail -n1); fi
+          echo "Using Xcode at: ${XC}"
+          sudo xcode-select -s "${XC}/Contents/Developer"
+
+      - name: Toolchain versions
+        run: |
+          set -euo pipefail
+          echo "===== Xcode ====="; xcodebuild -version
+          echo "===== SDKs ====="; xcodebuild -showsdks | grep -i ios || true
+          echo "===== CMake ====="; cmake --version
+          echo "===== clang ====="; clang --version
+
+      - name: Install build tools
+        run: |
+          set -euo pipefail
+          # Tools some vcpkg ports need when built from source for arm64-ios.
+          brew install autoconf automake autoconf-archive libtool nasm pkg-config cmake ninja || true
+
+      - name: Bootstrap vcpkg
+        run: |
+          set -euo pipefail
+          ./dependencies/vcpkg/bootstrap-vcpkg.sh
+
+      # ---- Stage 1: CMake configure (vcpkg install + generate Xcode project) ----
+      - name: "Stage 1 — CMake configure (iOS, Xcode generator)"
+        id: cmake
+        run: |
+          set -euo pipefail
+          cmake -S . -B build -G Xcode \
+            -DCMAKE_SYSTEM_NAME=iOS \
+            -DBUILD_HEADLESS_DYLIB=ON \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 \
+            2>&1 | tee cmake-configure.log
+          echo "----- generated Xcode projects -----"
+          find build -maxdepth 2 -name "*.xcodeproj" -print
+          echo "----- targets in generated core project -----"
+          xcodebuild -list -project build/src/cemuMain.xcodeproj 2>&1 | tee cmake-targets.log || true
+          test -d build/src/cemuMain.xcodeproj || { echo "::error::CMake did not generate build/src/cemuMain.xcodeproj (Stage: CMake configuration / vcpkg)"; exit 1; }
+
+      # ---- Stages 2-5: build the app (drives the core framework + input lib) ----
+      # A single xcodebuild invocation on the app scheme is the coherent path:
+      # the app project cross-references build/src/cemuMain.xcodeproj and builds
+      # its products (Cemu.framework, libCemuInput.a) into the shared
+      # DerivedData products dir, then links and compiles the SwiftUI app.
+      - name: "Stages 2-5 — xcodebuild MeloCafe (core framework + app, unsigned)"
+        id: xcodebuild
+        run: |
+          set -euo pipefail
+          set +e
+          xcodebuild \
+            -project MeloCafe/MeloCafe.xcodeproj \
+            -scheme MeloCafe \
+            -configuration "${CONFIG}" \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "${DERIVED}" \
+            -skipMacroValidation \
+            ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGN_STYLE=Manual \
+            DEVELOPMENT_TEAM="" \
+            build 2>&1 | tee xcodebuild.log
+          rc=${PIPESTATUS[0]}
+          set -e
+          if [ "${rc}" -ne 0 ]; then
+            echo "::group::Failure classification"
+            if grep -qiE "clang: error|C\+\+|\.cpp:[0-9]+:[0-9]+: error|fatal error: '.*' file not found" xcodebuild.log; then
+              echo "::error::Build failed during C++ compilation of the Cemu core (Stage c)."
+            fi
+            if grep -qiE "Undefined symbols|ld: |framework not found|library not found|linker command failed" xcodebuild.log; then
+              echo "::error::Build failed during framework/library linking (Stage d)."
+            fi
+            if grep -qiE "\.swift:[0-9]+:[0-9]+: error|Swift Compiler Error|bridging header" xcodebuild.log; then
+              echo "::error::Build failed during iOS app (Swift) compilation (Stage e)."
+            fi
+            if grep -qiE "unable to resolve package|package resolution|Melo-Controller" xcodebuild.log; then
+              echo "::error::Build failed resolving the Melo-Controller Swift package (network/SPM)."
+            fi
+            echo "::endgroup::"
+            exit "${rc}"
+          fi
+
+      # ---- Stage 6: locate .app and package the unsigned IPA ----
+      - name: "Stage 6 — Package unsigned IPA"
+        id: package
+        run: |
+          set -euo pipefail
+          PRODUCTS="${DERIVED}/Build/Products/${CONFIG}-iphoneos"
+          echo "Searching for MeloCafe.app under: ${PRODUCTS}"
+          APP="${PRODUCTS}/MeloCafe.app"
+          if [ ! -d "${APP}" ]; then
+            APP=$(find "${DERIVED}/Build/Products" -maxdepth 2 -name "MeloCafe.app" -type d | head -n1 || true)
+          fi
+          test -n "${APP}" && test -d "${APP}" || { echo "::error::MeloCafe.app was not produced (Stage: packaging)"; exit 1; }
+          echo "Found .app at: ${APP}"
+          # A real Mach-O executable must exist inside the bundle.
+          test -f "${APP}/MeloCafe" || { echo "::error::MeloCafe.app has no main executable — build did not actually produce the app."; exit 1; }
+          file "${APP}/MeloCafe"
+
+          rm -rf Payload MeloLightning.ipa
+          mkdir -p Payload
+          cp -R "${APP}" "Payload/MeloCafe.app"
+          # -y preserves symlinks inside frameworks (required for a valid bundle).
+          /usr/bin/zip -qry MeloLightning.ipa Payload
+          echo "----- IPA contents (top level) -----"
+          unzip -l MeloLightning.ipa | head -n 20
+          test -s MeloLightning.ipa || { echo "::error::MeloLightning.ipa is empty (Stage: packaging)"; exit 1; }
+          echo "app_path=${APP}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload unsigned IPA
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MeloLightning-unsigned-ipa
+          path: MeloLightning.ipa
+          if-no-files-found: error
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            cmake-configure.log
+            cmake-targets.log
+            xcodebuild.log
+          if-no-files-found: warn
