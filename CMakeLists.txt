@@ -313,17 +313,32 @@ endif()
 
 find_package(ZArchive QUIET)
 if (NOT ZArchive_FOUND)
-	add_subdirectory("dependencies/ZArchive" EXCLUDE_FROM_ALL)
-	if (IOS AND TARGET zarchiveTool)
+	if (IOS)
 		# On iOS, CMake defaults every executable to a MACOSX_BUNDLE app, so
-		# ZArchive's install(TARGETS zarchiveTool) fails with "no BUNDLE
-		# DESTINATION". zarchiveTool is a desktop-only CLI packaging utility; the
-		# iOS build only links the zarchive static library and the tool is
-		# EXCLUDE_FROM_ALL (never built or shipped in the app). Clearing the
-		# bundle flag turns its install rule into a plain, unused runtime rule so
-		# configuration succeeds — done here in the parent so the ZArchive
-		# submodule stays untouched.
-		set_target_properties(zarchiveTool PROPERTIES MACOSX_BUNDLE OFF)
+		# ZArchive's install(TARGETS zarchiveTool) aborts configure with "no
+		# BUNDLE DESTINATION". That install() is evaluated inline *during*
+		# add_subdirectory(), so a set_target_properties() in the parent after
+		# add_subdirectory() runs too late — the error has already fired. The
+		# MACOSX_BUNDLE property is seeded from CMAKE_MACOSX_BUNDLE at target
+		# creation time, so clear it *before* adding the submodule: zarchiveTool
+		# is then a plain executable and its install rule needs no bundle
+		# destination. The tool is a desktop-only CLI packager, EXCLUDE_FROM_ALL
+		# and never shipped; the iOS build only links the zarchive static
+		# library. Save/restore around the call so no other target is affected
+		# and the ZArchive submodule stays untouched.
+		if (DEFINED CMAKE_MACOSX_BUNDLE)
+			set(_cemu_saved_macosx_bundle "${CMAKE_MACOSX_BUNDLE}")
+		endif()
+		set(CMAKE_MACOSX_BUNDLE OFF)
+	endif()
+	add_subdirectory("dependencies/ZArchive" EXCLUDE_FROM_ALL)
+	if (IOS)
+		if (DEFINED _cemu_saved_macosx_bundle)
+			set(CMAKE_MACOSX_BUNDLE "${_cemu_saved_macosx_bundle}")
+			unset(_cemu_saved_macosx_bundle)
+		else()
+			unset(CMAKE_MACOSX_BUNDLE)
+		endif()
 	endif()
 endif()
 
