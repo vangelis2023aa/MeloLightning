@@ -1027,5 +1027,11 @@ namespace nsyshid
 
 		skyFile->SetPosition(0);
 		skyFile->writeData(data.data(), data.size());
+		// Push the buffered write out to the OS immediately. Save() is called on
+		// every block the game writes, but FileStream only flushes its std::fstream
+		// buffer on close (RemoveSkylander/destructor). On iOS the app is usually
+		// terminated by the OS without running those destructors, so without this
+		// flush in-game progress would sit in the buffer and be lost on exit.
+		skyFile->Flush();
 	}
 } // namespace nsyshid
