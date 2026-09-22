@@ -126,14 +126,27 @@ jobs:
         id: core
         run: |
           set -euo pipefail
+          : > core-build.log
+          # ih264d, zarchive and xbyak_aarch64 are added with EXCLUDE_FROM_ALL
+          # (root CMakeLists.txt), so they are not part of ALL_BUILD and an
+          # auto-created single-target scheme build of CemuBin does NOT build
+          # them. CemuBin's generated link line references them at their CMake
+          # binary-dir output paths (build/lib/Release/libxbyak_aarch64.a,
+          # build/dependencies/ih264d/${CONFIG}-iphoneos/libih264d.a,
+          # build/dependencies/ZArchive/${CONFIG}-iphoneos/libzarchive.a), so
+          # build these targets directly with cmake --build (no -derivedDataPath,
+          # so CMake writes them to exactly those binary-dir paths) rather than
+          # copying artifacts. The internal Cemu* libraries are in ALL and are
+          # already built as ordinary scheme dependencies.
+          echo "===== cmake --build ih264d zarchive xbyak_aarch64 =====" | tee -a core-build.log
+          cmake --build build --config "${CONFIG}" --target ih264d zarchive xbyak_aarch64 2>&1 | tee -a core-build.log
           # xcodebuild rejects -target together with -derivedDataPath ("-scheme
           # ... is required when specifying -derivedDataPath"). The CMake Xcode
           # generator names one scheme per target, so build the core products by
-          # scheme instead. One scheme per invocation, both writing into the same
-          # shared DerivedData the app build links against. CemuInput (a
-          # dependency of CemuBin) is built first so libCemuInput.a is present.
+          # scheme into the shared DerivedData the app build links against.
+          # CemuInput (a dependency of CemuBin) is built first so libCemuInput.a
+          # is present.
           set +e
-          : > core-build.log
           rc=0
           for SCHEME in CemuInput CemuBin; do
             echo "===== xcodebuild -scheme ${SCHEME} =====" | tee -a core-build.log
