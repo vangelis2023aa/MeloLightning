@@ -126,23 +126,34 @@ jobs:
         id: core
         run: |
           set -euo pipefail
+          # xcodebuild rejects -target together with -derivedDataPath ("-scheme
+          # ... is required when specifying -derivedDataPath"). The CMake Xcode
+          # generator names one scheme per target, so build the core products by
+          # scheme instead. One scheme per invocation, both writing into the same
+          # shared DerivedData the app build links against. CemuInput (a
+          # dependency of CemuBin) is built first so libCemuInput.a is present.
           set +e
-          xcodebuild \
-            -project build/src/cemuMain.xcodeproj \
-            -target CemuBin \
-            -target CemuInput \
-            -configuration "${CONFIG}" \
-            -sdk iphoneos \
-            -destination 'generic/platform=iOS' \
-            -derivedDataPath "${DERIVED}" \
-            ONLY_ACTIVE_ARCH=NO \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGN_STYLE=Manual \
-            DEVELOPMENT_TEAM="" \
-            build 2>&1 | tee core-build.log
-          rc=${PIPESTATUS[0]}
+          : > core-build.log
+          rc=0
+          for SCHEME in CemuInput CemuBin; do
+            echo "===== xcodebuild -scheme ${SCHEME} =====" | tee -a core-build.log
+            xcodebuild \
+              -project build/src/cemuMain.xcodeproj \
+              -scheme "${SCHEME}" \
+              -configuration "${CONFIG}" \
+              -sdk iphoneos \
+              -destination 'generic/platform=iOS' \
+              -derivedDataPath "${DERIVED}" \
+              ONLY_ACTIVE_ARCH=NO \
+              CODE_SIGN_IDENTITY="" \
+              CODE_SIGNING_REQUIRED=NO \
+              CODE_SIGNING_ALLOWED=NO \
+              CODE_SIGN_STYLE=Manual \
+              DEVELOPMENT_TEAM="" \
+              build 2>&1 | tee -a core-build.log
+            rc=${PIPESTATUS[0]}
+            [ "${rc}" -ne 0 ] && break
+          done
           set -e
           if [ "${rc}" -ne 0 ]; then
             echo "::group::Core failure classification"
