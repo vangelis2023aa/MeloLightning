@@ -314,6 +314,17 @@ endif()
 find_package(ZArchive QUIET)
 if (NOT ZArchive_FOUND)
 	add_subdirectory("dependencies/ZArchive" EXCLUDE_FROM_ALL)
+	if (IOS AND TARGET zarchiveTool)
+		# On iOS, CMake defaults every executable to a MACOSX_BUNDLE app, so
+		# ZArchive's install(TARGETS zarchiveTool) fails with "no BUNDLE
+		# DESTINATION". zarchiveTool is a desktop-only CLI packaging utility; the
+		# iOS build only links the zarchive static library and the tool is
+		# EXCLUDE_FROM_ALL (never built or shipped in the app). Clearing the
+		# bundle flag turns its install rule into a plain, unused runtime rule so
+		# configuration succeeds — done here in the parent so the ZArchive
+		# submodule stays untouched.
+		set_target_properties(zarchiveTool PROPERTIES MACOSX_BUNDLE OFF)
+	endif()
 endif()
 
 add_subdirectory(src)
