@@ -89,8 +89,16 @@ jobs:
         id: cmake
         run: |
           set -euo pipefail
+          # CMAKE_OSX_ARCHITECTURES must be set explicitly: with the Xcode
+          # generator + CMAKE_SYSTEM_NAME=iOS, CMake leaves it empty (Xcode
+          # resolves ARCHS at build time) and CMAKE_SYSTEM_PROCESSOR is also
+          # empty when cross-compiling. dependencies/ih264d/CMakeLists.txt reads
+          # CMAKE_OSX_ARCHITECTURES (falling back to CMAKE_SYSTEM_PROCESSOR) and
+          # FATAL_ERRORs on an empty value. arm64 is the only arch the arm64-ios
+          # vcpkg triplet targets; this mirrors the macOS build (build.yml).
           cmake -S . -B build -G Xcode \
             -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
             -DBUILD_HEADLESS_DYLIB=ON \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 \
             2>&1 | tee cmake-configure.log
