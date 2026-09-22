@@ -9,10 +9,15 @@ name: Build IPA
 #      generates build/src/cemuMain.xcodeproj with the CemuBin (-> Cemu.framework)
 #      and CemuInput (-> libCemuInput.a) targets and installs the arm64-ios
 #      vcpkg dependencies.
-#   2. xcodebuild builds MeloCafe/MeloCafe.xcodeproj (scheme "MeloCafe"), which
-#      references that generated project, builds/links Cemu.framework +
-#      libCemuInput.a, and produces MeloCafe.app.
-#   3. The .app is wrapped as Payload/MeloCafe.app and zipped to MeloLightning.ipa.
+#   2. xcodebuild builds the generated core project's CemuBin (-> Cemu.framework)
+#      and CemuInput (-> libCemuInput.a) into a shared DerivedData products dir.
+#   3. xcodebuild builds MeloCafe/MeloCafe.xcodeproj (scheme "MeloCafe") against
+#      that same DerivedData, linking Cemu.framework + libCemuInput.a, producing
+#      MeloCafe.app.
+#   4. The .app is wrapped as Payload/MeloCafe.app and zipped to MeloLightning.ipa.
+#
+# It never builds the desktop macOS Cemu target and never installs wxWidgets;
+# it is fully independent of the Linux/Windows/macOS/AppImage jobs.
 
 on:
   workflow_dispatch:
@@ -100,12 +105,56 @@ jobs:
           xcodebuild -list -project build/src/cemuMain.xcodeproj 2>&1 | tee cmake-targets.log || true
           test -d build/src/cemuMain.xcodeproj || { echo "::error::CMake did not generate build/src/cemuMain.xcodeproj (Stage: CMake configuration / vcpkg)"; exit 1; }
 
-      # ---- Stages 2-5: build the app (drives the core framework + input lib) ----
-      # A single xcodebuild invocation on the app scheme is the coherent path:
-      # the app project cross-references build/src/cemuMain.xcodeproj and builds
-      # its products (Cemu.framework, libCemuInput.a) into the shared
-      # DerivedData products dir, then links and compiles the SwiftUI app.
-      - name: "Stages 2-5 — xcodebuild MeloCafe (core framework + app, unsigned)"
+      # ---- Stage 2: build the generated iOS Cemu core project ----
+      # Build the CMake-generated build/src/cemuMain.xcodeproj so that
+      # Cemu.framework and libCemuInput.a exist in the SHARED DerivedData
+      # products dir that the MeloCafe app project links against. Using the
+      # same -derivedDataPath as the app build below is what makes the app's
+      # BUILT_PRODUCTS_DIR cross-project references resolve. This step alone
+      # isolates C++ compilation / framework-link failures from app failures.
+      # Only the iOS CemuBin/CemuInput targets are built — never the desktop
+      # macOS Cemu target.
+      - name: "Stage 2 — Build iOS Cemu core (Cemu.framework + libCemuInput.a)"
+        id: core
+        run: |
+          set -euo pipefail
+          set +e
+          xcodebuild \
+            -project build/src/cemuMain.xcodeproj \
+            -target CemuBin \
+            -target CemuInput \
+            -configuration "${CONFIG}" \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "${DERIVED}" \
+            ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGN_STYLE=Manual \
+            DEVELOPMENT_TEAM="" \
+            build 2>&1 | tee core-build.log
+          rc=${PIPESTATUS[0]}
+          set -e
+          if [ "${rc}" -ne 0 ]; then
+            echo "::group::Core failure classification"
+            if grep -qiE "clang: error|\.(cpp|mm|h):[0-9]+:[0-9]+: error|fatal error: '.*' file not found" core-build.log; then
+              echo "::error::Core build failed during C++ compilation of the Cemu core (Stage c)."
+            fi
+            if grep -qiE "Undefined symbols|ld: |framework not found|library not found|linker command failed" core-build.log; then
+              echo "::error::Core build failed during framework/library linking (Stage d)."
+            fi
+            echo "::endgroup::"
+            exit "${rc}"
+          fi
+          echo "----- products after core build -----"
+          PRODUCTS="${DERIVED}/Build/Products/${CONFIG}-iphoneos"
+          ls -la "${PRODUCTS}" || true
+          test -d "${PRODUCTS}/Cemu.framework" || { echo "::error::Cemu.framework was not produced by the core build (Stage d: framework)."; exit 1; }
+          test -f "${PRODUCTS}/libCemuInput.a" || { echo "::error::libCemuInput.a was not produced by the core build (Stage d: static lib)."; exit 1; }
+
+      # ---- Stages 3-4: build the MeloCafe app (links the core, unsigned) ----
+      - name: "Stages 3-4 — Build MeloCafe app (iOS device, unsigned)"
         id: xcodebuild
         run: |
           set -euo pipefail
@@ -128,25 +177,22 @@ jobs:
           rc=${PIPESTATUS[0]}
           set -e
           if [ "${rc}" -ne 0 ]; then
-            echo "::group::Failure classification"
-            if grep -qiE "clang: error|C\+\+|\.cpp:[0-9]+:[0-9]+: error|fatal error: '.*' file not found" xcodebuild.log; then
-              echo "::error::Build failed during C++ compilation of the Cemu core (Stage c)."
-            fi
+            echo "::group::App failure classification"
             if grep -qiE "Undefined symbols|ld: |framework not found|library not found|linker command failed" xcodebuild.log; then
-              echo "::error::Build failed during framework/library linking (Stage d)."
+              echo "::error::App build failed during framework/library linking (Stage d)."
             fi
             if grep -qiE "\.swift:[0-9]+:[0-9]+: error|Swift Compiler Error|bridging header" xcodebuild.log; then
-              echo "::error::Build failed during iOS app (Swift) compilation (Stage e)."
+              echo "::error::App build failed during iOS app (Swift) compilation (Stage e)."
             fi
             if grep -qiE "unable to resolve package|package resolution|Melo-Controller" xcodebuild.log; then
-              echo "::error::Build failed resolving the Melo-Controller Swift package (network/SPM)."
+              echo "::error::App build failed resolving the Melo-Controller Swift package (network/SPM)."
             fi
             echo "::endgroup::"
             exit "${rc}"
           fi
 
-      # ---- Stage 6: locate .app and package the unsigned IPA ----
-      - name: "Stage 6 — Package unsigned IPA"
+      # ---- Stage 5: locate .app and package the unsigned IPA ----
+      - name: "Stage 5 — Package unsigned IPA"
         id: package
         run: |
           set -euo pipefail
@@ -188,5 +234,6 @@ jobs:
           path: |
             cmake-configure.log
             cmake-targets.log
+            core-build.log
             xcodebuild.log
           if-no-files-found: warn
