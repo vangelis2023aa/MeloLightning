@@ -179,11 +179,29 @@ jobs:
             echo "::endgroup::"
             exit "${rc}"
           fi
-          echo "----- products after core build -----"
-          PRODUCTS="${DERIVED}/Build/Products/${CONFIG}-iphoneos"
-          ls -la "${PRODUCTS}" || true
-          test -d "${PRODUCTS}/Cemu.framework" || { echo "::error::Cemu.framework was not produced by the core build (Stage d: framework)."; exit 1; }
-          test -f "${PRODUCTS}/libCemuInput.a" || { echo "::error::libCemuInput.a was not produced by the core build (Stage d: static lib)."; exit 1; }
+          # CMake's Xcode generator bakes its own SYMROOT / CONFIGURATION_BUILD_DIR
+          # (the CMake binary dir) into build/src/cemuMain.xcodeproj, so
+          # -derivedDataPath does NOT relocate the core products: xcodebuild
+          # writes them under build/ (e.g. build/src/${CONFIG}-iphoneos/Cemu.framework),
+          # not ${DERIVED}/Build/Products. Discover the real output locations
+          # rather than assuming the DerivedData layout, gate on them, and export
+          # the two directories so the app build (Stages 3-4) links/embeds from
+          # exactly where the core build produced them.
+          echo "----- locating core products under build/ -----"
+          FW=$(find build -type d -name "Cemu.framework" -path "*${CONFIG}-iphoneos*" 2>/dev/null | head -n1 || true)
+          [ -z "${FW}" ] && FW=$(find build -type d -name "Cemu.framework" 2>/dev/null | head -n1 || true)
+          test -n "${FW}" && test -d "${FW}" || { echo "::error::Cemu.framework was not produced by the core build (Stage d: framework)."; exit 1; }
+          test -f "${FW}/Cemu" || { echo "::error::Cemu.framework has no Mach-O executable (Stage d: framework)."; exit 1; }
+          LIB=$(find build -type f -name "libCemuInput.a" -path "*${CONFIG}-iphoneos*" 2>/dev/null | head -n1 || true)
+          [ -z "${LIB}" ] && LIB=$(find build -type f -name "libCemuInput.a" 2>/dev/null | head -n1 || true)
+          test -n "${LIB}" && test -f "${LIB}" || { echo "::error::libCemuInput.a was not produced by the core build (Stage d: static lib)."; exit 1; }
+          FW_DIR=$(cd "$(dirname "${FW}")" && pwd)
+          LIB_DIR=$(cd "$(dirname "${LIB}")" && pwd)
+          echo "Cemu.framework dir: ${FW_DIR}"
+          echo "libCemuInput.a dir: ${LIB_DIR}"
+          ls -la "${FW_DIR}" || true
+          # Hand the real product directories to the app build below.
+          { echo "CEMU_FW_DIR=${FW_DIR}"; echo "CEMU_LIB_DIR=${LIB_DIR}"; } >> "$GITHUB_ENV"
 
       # ---- Stages 3-4: build the MeloCafe app (links the core, unsigned) ----
       - name: "Stages 3-4 — Build MeloCafe app (iOS device, unsigned)"
@@ -191,6 +209,14 @@ jobs:
         run: |
           set -euo pipefail
           set +e
+          # The core products live under build/ (CMake's Xcode generator bakes
+          # its own build dir), NOT in ${DERIVED}/Build/Products. Point the app's
+          # linker at the directories Stage 2 discovered (CEMU_FW_DIR / CEMU_LIB_DIR)
+          # so Cemu.framework and libCemuInput.a resolve for the link step; the
+          # cross-project reference proxies in MeloCafe.xcodeproj resolve the embed
+          # from the same core build. $(inherited) is preserved so the project's
+          # own FRAMEWORK_SEARCH_PATHS / LIBRARY_SEARCH_PATHS are not lost.
+          echo "Using core products: framework=${CEMU_FW_DIR:-<unset>} lib=${CEMU_LIB_DIR:-<unset>}"
           xcodebuild \
             -project MeloCafe/MeloCafe.xcodeproj \
             -scheme MeloCafe \
@@ -205,6 +231,8 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGN_STYLE=Manual \
             DEVELOPMENT_TEAM="" \
+            FRAMEWORK_SEARCH_PATHS="\$(inherited) ${CEMU_FW_DIR}" \
+            LIBRARY_SEARCH_PATHS="\$(inherited) ${CEMU_LIB_DIR}" \
             build 2>&1 | tee xcodebuild.log
           rc=${PIPESTATUS[0]}
           set -e
