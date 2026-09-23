@@ -33,9 +33,12 @@ permissions:
 
 jobs:
   build-ipa:
-    # Xcode 26 project (objectVersion 77, CreatedOnToolsVersion 26.2) -> needs
-    # a runner image that ships Xcode 26. macos-26 is the current image for that.
-    runs-on: macos-26
+    # The app uses iOS 27 SDK symbols (UISceneAccessoryRegistration,
+    # registerSceneAccessory, .externalNonInteractive) that exist only in the
+    # iOS 27 SDK. The macos-26 image ships only up to iOS 26.5, so we need
+    # GitHub's Xcode 27 public-preview image, which ships Xcode 27.0 + the
+    # iOS 27.0 SDK. (Preview image: may be less stable / have queue delays.)
+    runs-on: xcode-27
 
     env:
       CONFIG: ${{ inputs.configuration || 'Release' }}
@@ -64,8 +67,11 @@ jobs:
       - name: Select Xcode
         run: |
           set -euo pipefail
-          # Prefer an installed Xcode 26.x; fall back to latest available.
-          XC=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -n1 || true)
+          # The xcode-27 image ships Xcode 27 (with the iOS 27 SDK) as default.
+          # Prefer an Xcode 27.x; fall back to /Applications/Xcode.app (which
+          # points at 27 on this image), then to the latest available.
+          XC=$(ls -d /Applications/Xcode_27*.app 2>/dev/null | sort -V | tail -n1 || true)
+          if [ -z "${XC}" ] && [ -d /Applications/Xcode.app ]; then XC="/Applications/Xcode.app"; fi
           if [ -z "${XC}" ]; then XC=$(ls -d /Applications/Xcode*.app | sort -V | tail -n1); fi
           echo "Using Xcode at: ${XC}"
           sudo xcode-select -s "${XC}/Contents/Developer"
