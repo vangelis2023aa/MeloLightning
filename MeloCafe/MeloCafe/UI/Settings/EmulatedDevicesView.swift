@@ -129,7 +129,7 @@ private struct EmulatedDeviceSlotsView: View {
         } header: {
             Text("Figures")
         } footer: {
-            Text("Load a .\(device.fileExtension) figure dump or create a figure. Files and game progress are saved in Documents/Emulated Devices. Clear removes a figure from the device and keeps its file.")
+            Text("Load a .\(device.fileExtension) figure dump or create a figure. A loaded dump is updated in place, so progress is saved back to the file you picked; created figures are saved in Documents/Emulated Devices. Clear removes a figure from the device and keeps its file.")
         }
         .onAppear { refresh() }
         .alert("Emulated Devices", isPresented: Binding(
@@ -151,17 +151,23 @@ private struct EmulatedDeviceSlotsView: View {
     }
     
     private func load(slot: Int) {
-        FileImporterManager.shared.importFiles(types: [.item]) { result in
+        // Load the picked figure dump IN PLACE so in-game progress (XP, gold,
+        // upgrades) is written back to the SAME .sky/.bin the user selected —
+        // that file is the persistent source of truth. We do NOT copy it into
+        // Documents/Emulated Devices, which used to strand progress in an
+        // unreferenced sandbox copy while the original stayed pristine.
+        //
+        // stopAccessingSecurityScopedResources: false keeps the security scope
+        // open past this closure so the emulator core can open a read/write
+        // handle to the original file. The core holds that descriptor for the
+        // whole session and flushes each block write (SkylanderUSB::Skylander::
+        // Save), so progress lands in the original even if iOS later kills the app.
+        FileImporterManager.shared.importFiles(types: [.item], stopAccessingSecurityScopedResources: false) { result in
             switch result {
             case .success(let urls):
                 guard let source = urls.first else { return }
-                do {
-                    let file = try EmulatedFigureFiles.importFigure(source, device: device)
-                    errorMessage = CemuEmulatedUSBDevices.load(device.bridge, slot: slot, path: file.path)
-                    refresh()
-                } catch {
-                    errorMessage = error.localizedDescription
-                }
+                errorMessage = CemuEmulatedUSBDevices.load(device.bridge, slot: slot, path: source.path)
+                refresh()
             case .failure(let error):
                 let error = error as NSError
                 if error.domain != "FileImporterManager" || error.code != 2 {
