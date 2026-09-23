@@ -182,26 +182,32 @@ jobs:
           # CMake's Xcode generator bakes its own SYMROOT / CONFIGURATION_BUILD_DIR
           # (the CMake binary dir) into build/src/cemuMain.xcodeproj, so
           # -derivedDataPath does NOT relocate the core products: xcodebuild
-          # writes them under build/ (e.g. build/src/${CONFIG}-iphoneos/Cemu.framework),
-          # not ${DERIVED}/Build/Products. Discover the real output locations
-          # rather than assuming the DerivedData layout, gate on them, and export
-          # the two directories so the app build (Stages 3-4) links/embeds from
-          # exactly where the core build produced them.
+          # writes the real Cemu.framework to build/src/${CONFIG}-iphoneos, not
+          # ${DERIVED}/Build/Products. Use that explicit CMake output path — a
+          # blind `find build -name Cemu.framework` also matches Xcode's eager
+          # linking stub at build/build/EagerLinkingTBDs/${CONFIG}-iphoneos/
+          # Cemu.framework, which holds only Cemu.tbd (no Mach-O) and was being
+          # selected first, producing a false "has no Mach-O executable" failure.
           echo "----- locating core products under build/ -----"
-          FW=$(find build -type d -name "Cemu.framework" -path "*${CONFIG}-iphoneos*" 2>/dev/null | head -n1 || true)
-          [ -z "${FW}" ] && FW=$(find build -type d -name "Cemu.framework" 2>/dev/null | head -n1 || true)
-          test -n "${FW}" && test -d "${FW}" || { echo "::error::Cemu.framework was not produced by the core build (Stage d: framework)."; exit 1; }
-          test -f "${FW}/Cemu" || { echo "::error::Cemu.framework has no Mach-O executable (Stage d: framework)."; exit 1; }
-          LIB=$(find build -type f -name "libCemuInput.a" -path "*${CONFIG}-iphoneos*" 2>/dev/null | head -n1 || true)
-          [ -z "${LIB}" ] && LIB=$(find build -type f -name "libCemuInput.a" 2>/dev/null | head -n1 || true)
+          CEMU_FW_DIR="${GITHUB_WORKSPACE}/build/src/${CONFIG}-iphoneos"
+          test -d "${CEMU_FW_DIR}/Cemu.framework" || { echo "::error::Cemu.framework was not produced at ${CEMU_FW_DIR} (Stage d: framework)."; exit 1; }
+          test -f "${CEMU_FW_DIR}/Cemu.framework/Cemu" || { echo "::error::Cemu.framework has no Mach-O executable at ${CEMU_FW_DIR} (Stage d: framework)."; exit 1; }
+          file "${CEMU_FW_DIR}/Cemu.framework/Cemu" | grep -qiE "Mach-O|dynamically linked shared library|current ar archive|object" \
+            || { echo "::error::${CEMU_FW_DIR}/Cemu.framework/Cemu is not a Mach-O binary (Stage d: framework)."; file "${CEMU_FW_DIR}/Cemu.framework/Cemu"; exit 1; }
+          # Static lib: locate the real CMake output, excluding the EagerLinkingTBDs
+          # stub tree so a .tbd/reference path can never be selected.
+          LIB=$(find build/src -type f -name "libCemuInput.a" -path "*${CONFIG}-iphoneos*" ! -path "*EagerLinkingTBDs*" 2>/dev/null | head -n1 || true)
+          [ -z "${LIB}" ] && LIB=$(find build/src -type f -name "libCemuInput.a" ! -path "*EagerLinkingTBDs*" 2>/dev/null | head -n1 || true)
+          [ -z "${LIB}" ] && LIB=$(find build -type f -name "libCemuInput.a" ! -path "*EagerLinkingTBDs*" 2>/dev/null | head -n1 || true)
           test -n "${LIB}" && test -f "${LIB}" || { echo "::error::libCemuInput.a was not produced by the core build (Stage d: static lib)."; exit 1; }
-          FW_DIR=$(cd "$(dirname "${FW}")" && pwd)
-          LIB_DIR=$(cd "$(dirname "${LIB}")" && pwd)
-          echo "Cemu.framework dir: ${FW_DIR}"
-          echo "libCemuInput.a dir: ${LIB_DIR}"
-          ls -la "${FW_DIR}" || true
+          CEMU_LIB_DIR=$(cd "$(dirname "${LIB}")" && pwd)
+          echo "Selected Cemu.framework dir: ${CEMU_FW_DIR}"
+          echo "Selected libCemuInput.a dir: ${CEMU_LIB_DIR}"
+          ls -l "${CEMU_FW_DIR}/Cemu.framework"
+          file "${CEMU_FW_DIR}/Cemu.framework/Cemu"
+          ls -l "${CEMU_LIB_DIR}/libCemuInput.a"
           # Hand the real product directories to the app build below.
-          { echo "CEMU_FW_DIR=${FW_DIR}"; echo "CEMU_LIB_DIR=${LIB_DIR}"; } >> "$GITHUB_ENV"
+          { echo "CEMU_FW_DIR=${CEMU_FW_DIR}"; echo "CEMU_LIB_DIR=${CEMU_LIB_DIR}"; } >> "$GITHUB_ENV"
 
       # ---- Stages 3-4: build the MeloCafe app (links the core, unsigned) ----
       - name: "Stages 3-4 — Build MeloCafe app (iOS device, unsigned)"
