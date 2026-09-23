@@ -18,11 +18,27 @@
 
 #include "Cafe/CafeSystem.h"
 
+#include "util/highresolutiontimer/HighResolutionTimer.h"
+
 #include <boost/container/small_vector.hpp>
+#include <thread>
+#include <chrono>
 
 void LatteCP_DebugPrintCmdBuffer(uint32be* bufferPtr, uint32 size);
 
 #define CP_TIMER_RECHECK	1024
+
+// Idle backoff for the GPU command-ring wait (LatteCP_readU32Deprc). On ARM/iOS
+// _mm_pause() is only a "yield" hint and does not idle the core, so the original
+// pure spin+yield burned a full core whenever the command ring was empty. While
+// (and only while) the ring is empty we keep a very short spin for low-latency
+// pickup, then ramp to short, bounded sleeps. The sleep is additionally clamped
+// to the next simulated vsync deadline so vsync cadence and deadlines are left
+// exactly as before. When a command arrives the function returns, which resets
+// the backoff on the next call.
+static constexpr uint32 kLatteCPIdleSpinIterations = 16;   // yield-only iterations before we begin sleeping
+static constexpr uint32 kLatteCPIdleBackoffStepUs  = 100;  // additional sleep granted per further idle iteration
+static constexpr uint32 kLatteCPIdleBackoffMaxUs   = 500;  // hard cap so queued commands are never materially delayed
 
 //#define LATTE_CP_LOGGING
 
@@ -144,6 +160,7 @@ void LatteCP_signalEnterWait()
 uint32 LatteCP_readU32Deprc()
 {
 	// no display list active
+	uint32 idleIterations = 0; // how long the ring has been continuously empty during this wait
 	while (true)
 	{
 		uint32 cmdWord;
@@ -170,7 +187,43 @@ uint32 LatteCP_readU32Deprc()
 		// still no command data available, do some other tasks
 		LatteTiming_HandleTimedVsync();
 		LatteAsyncCommands_checkAndExecute();
-		std::this_thread::yield();
+
+		// The ring is genuinely empty here (the GPU has drained all queued work and
+		// is waiting on the CPU), so backing off cannot delay commands that are
+		// already queued. Keep yielding for the first few idle iterations to retain
+		// minimal pickup latency for brief command gaps, then ramp to short bounded
+		// sleeps so the thread stops spinning a core. The sleep is clamped to the
+		// next simulated vsync deadline so LatteTiming_HandleTimedVsync() still fires
+		// on time and vsync deadlines/pacing are unchanged.
+		idleIterations++;
+		if (idleIterations < kLatteCPIdleSpinIterations)
+		{
+			std::this_thread::yield();
+		}
+		else
+		{
+			uint32 sleepUs = (idleIterations - kLatteCPIdleSpinIterations + 1) * kLatteCPIdleBackoffStepUs;
+			if (sleepUs > kLatteCPIdleBackoffMaxUs)
+				sleepUs = kLatteCPIdleBackoffMaxUs;
+			// never sleep past the next vsync deadline
+			uint64 nowTick = HighResolutionTimer::now().getTick();
+			uint64 nextVSync = LatteGPUState.timer_nextVSync;
+			if (nextVSync > nowTick)
+			{
+				uint64 untilVSyncUs = HighResolutionTimer::ticksToMicroseconds(nextVSync - nowTick);
+				if (untilVSyncUs < (uint64)sleepUs)
+					sleepUs = (uint32)untilVSyncUs;
+			}
+			else
+			{
+				sleepUs = 0; // vsync is already due; do not sleep so it fires immediately next iteration
+			}
+
+			if (sleepUs > 0)
+				std::this_thread::sleep_for(std::chrono::microseconds(sleepUs));
+			else
+				std::this_thread::yield();
+		}
 		performanceMonitor.gpuTime_idleTime.endMeasuring();
 	}
 	UNREACHABLE;
@@ -914,12 +967,34 @@ LatteCMDPtr LatteCP_itHLEWaitForFlip(LatteCMDPtr cmd, uint32 nWords)
 	uint32 currentFlipCount = LatteGPUState.flipCounter;
 	while (true)
 	{
-		_mm_pause();
 		if (currentFlipCount != LatteGPUState.flipCounter)
 		{
 			break;
 		}
-		// check if any GPU events happened
+		// The flip is driven purely by the simulated vsync timer: LatteTiming_
+		// HandleTimedVsync() advances flipCounter once HighResolutionTimer::now()
+		// reaches LatteGPUState.timer_nextVSync. Rather than busy-spinning the whole
+		// frame interval (which on ARM/iOS burns a full core, since _mm_pause() is
+		// only a yield hint), sleep until shortly before that existing deadline and
+		// then fall back to the original high-precision spin for the final fraction.
+		// The deadline itself, the vsync math, missed-vsync catch-up, and all work
+		// inside LatteTiming_HandleTimedVsync() are left unchanged, so frame pacing
+		// is identical.
+		uint64 nowTick = HighResolutionTimer::now().getTick();
+		uint64 deadline = LatteGPUState.timer_nextVSync;
+		if (nowTick < deadline)
+		{
+			uint64 remainingUs = HighResolutionTimer::ticksToMicroseconds(deadline - nowTick);
+			// keep a margin for the final spin so host-sleep overshoot cannot push
+			// us past the deadline and disturb pacing
+			constexpr uint64 kFlipSpinMarginUs = 1000;
+			if (remainingUs > kFlipSpinMarginUs)
+				std::this_thread::sleep_for(std::chrono::microseconds(remainingUs - kFlipSpinMarginUs));
+		}
+		// final fraction / overshoot handling: re-read the timer via the existing
+		// vsync path. If the host sleep overshot the deadline this fires the vsync
+		// immediately; the deadline is never moved or extended to compensate.
+		_mm_pause();
 		LatteTiming_HandleTimedVsync();
 		std::this_thread::yield();
 	}

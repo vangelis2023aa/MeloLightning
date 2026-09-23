@@ -972,8 +972,14 @@ void InputManager::update_thread()
         for (auto& pad : m_wpad) { if (pad) pad->update(); }
         lock.unlock();
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        std::this_thread::yield();
+        // The game reads live input on-demand via VPADRead at its own frame rate;
+        // this background thread only advances the rumble/motor parser, which is
+        // internally gated to 60 Hz (see VPADController::update). Waking at ~1 kHz
+        // therefore performed the same work ~8x per useful update for no benefit.
+        // Sleeping 8 ms (~125 Hz) keeps the 60 Hz rumble gate reliably serviced
+        // while letting the core idle the rest of the time. The trailing yield()
+        // after a timed sleep was redundant and has been removed.
+        std::this_thread::sleep_for(std::chrono::milliseconds(8));
     }
 }
 
