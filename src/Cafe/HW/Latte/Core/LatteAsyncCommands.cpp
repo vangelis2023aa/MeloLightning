@@ -3,8 +3,14 @@
 #include "Cafe/HW/Latte/Core/LatteShader.h"
 #include "Cafe/HW/Latte/Core/LatteSurfaceCopy.h"
 #include "Cafe/HW/Latte/Core/LatteTexture.h"
+#include "Cafe/HW/Latte/Core/LattePerformanceMonitor.h"
 
 void LatteThread_Exit();
+
+#if LATTE_FENCE_PROFILING
+uint64 g_latteAsyncCommandsExecutedDebug = 0;
+#endif
+
 
 SlimRWLock swl_gpuAsyncCommands;
 
@@ -160,6 +166,9 @@ void LatteAsyncCommands_checkAndExecute()
 		}
 		swl_gpuAsyncCommands.LockWrite();
 		LatteAsyncCommandQueue.pop();
+#if LATTE_FENCE_PROFILING
+		g_latteAsyncCommandsExecutedDebug++;
+#endif
 	}
 	swl_gpuAsyncCommands.UnlockWrite();
 }
