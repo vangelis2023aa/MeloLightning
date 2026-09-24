@@ -117,6 +117,14 @@ namespace coreinit
 			return currentTick >= g_soonestAlarm;
 		}
 
+		// Fire tick of the next alarm to trigger (guest timer ticks), or uint64 max if none is
+		// scheduled. Used by the scheduler idle wait to clamp its sleep to the alarm deadline so
+		// alarm latency stays at zero.
+		static uint64 getSoonestFireTick()
+		{
+			return g_soonestAlarm.load(std::memory_order::relaxed);
+		}
+
         static void Reset()
         {
             g_activeAlarmList.clear();
@@ -164,7 +172,7 @@ namespace coreinit
 	}
 
 	void alarm_update()
-	{	
+	{
 		cemu_assert_debug(!__OSHasSchedulerLock());
 		uint64 currentTick = coreinit::OSGetTime();
 		if (!OSHostAlarm::quickCheckForAlarm(currentTick))
@@ -172,6 +180,11 @@ namespace coreinit
 		__OSLockScheduler();
 		OSHostAlarm::updateAlarms(currentTick);
 		__OSUnlockScheduler();
+	}
+
+	uint64 alarm_getSoonestFireTick()
+	{
+		return OSHostAlarm::getSoonestFireTick();
 	}
 
 	/* alarm API */

@@ -112,6 +112,19 @@ public:
 			m_condition.wait(lock);
 	}
 
+	// Like waitUntilNonZero(), but returns after at most `microseconds` even if the count is
+	// still zero. Non-decrementing: it only observes the count and never consumes it, matching
+	// waitUntilNonZero() semantics. Woken immediately by increment()'s notify on the 0->1
+	// transition. The under-lock re-check closes the check-then-wait race (no lost wakeup); the
+	// timeout is an independent backstop so a caller can also poll on a bounded interval.
+	void waitUntilNonZeroWithTimeout(uint64 microseconds)
+	{
+		std::unique_lock lock(m_mutex);
+		if (m_count != 0)
+			return;
+		m_condition.wait_for(lock, std::chrono::microseconds(microseconds));
+	}
+
 	bool isZero() const
 	{
 		return m_count == 0;

@@ -1244,6 +1244,31 @@ namespace coreinit
 		nnNfp_update();
 	}
 
+	// Upper bound on how long the multicore main core may sleep while idle before it must
+	// re-run __OSCheckSystemEvents(). Kept well below AX's ~1.7ms minimum audio cadence so audio
+	// is never starved; NFP polling at this rate is imperceptible.
+	static constexpr uint64 kIdleServiceMaxSleepUs = 1000;
+
+	// Compute how long the idle main core may block waiting for a runnable thread. Defaults to
+	// the audio-safe cap above, but is shortened so the core wakes exactly when the next OS alarm
+	// is due (zero added alarm latency). Overflow-safe: the tick delta is only converted to
+	// microseconds when it is already known to be within the cap window (no alarm pending, or a
+	// far-future alarm, leaves the cap in place).
+	static uint64 __OSComputeIdleServiceTimeoutUs()
+	{
+		uint64 timeoutUs = kIdleServiceMaxSleepUs;
+		uint64 soonestFireTick = coreinit::alarm_getSoonestFireTick();
+		uint64 nowTick = coreinit::OSGetTime();
+		if (soonestFireTick > nowTick)
+		{
+			uint64 deltaTicks = soonestFireTick - nowTick;
+			uint64 capTicks = kIdleServiceMaxSleepUs * (uint64)ESPRESSO_TIMER_CLOCK / 1000000ull;
+			if (deltaTicks < capTicks)
+				timeoutUs = deltaTicks * 1000000ull / (uint64)ESPRESSO_TIMER_CLOCK;
+		}
+		return timeoutUs;
+	}
+
 	Fiber* g_idleLoopFiber[3]{};
 
 	// idle fiber per core if no thread is runnable
@@ -1270,7 +1295,26 @@ namespace coreinit
 			{
 				__OSCheckSystemEvents();
 				if(g_isMulticoreMode == false)
+				{
 					coreIndex = (coreIndex + 1) % 3;
+				}
+				else
+				{
+					// Multicore main core (core 1): when no guest thread is runnable on this
+					// core, block until one becomes runnable or until a short, bounded interval
+					// elapses, instead of busy-spinning a full core. The run-queue semaphore's
+					// notify on the 0->1 transition (__OSAddReadyThread -> increment()) wakes us
+					// immediately when work arrives, so guest scheduling latency is unchanged; the
+					// bounded timeout (clamped to the next alarm deadline, capped below AX's audio
+					// cadence) guarantees system events keep being serviced promptly while idle.
+					// Single-core mode is intentionally left on the round-robin path above.
+					if (g_coreRunQueueThreadCount[coreIndex].isZero())
+					{
+						g_coreRunQueueThreadCount[coreIndex].waitUntilNonZeroWithTimeout(__OSComputeIdleServiceTimeoutUs());
+						if (!sSchedulerActive.load(std::memory_order::relaxed))
+							Fiber::Switch(*t_schedulerFiber); // switch back to original thread to exit
+					}
+				}
 			}
 			else
 			{

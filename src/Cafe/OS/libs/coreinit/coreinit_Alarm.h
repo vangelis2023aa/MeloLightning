@@ -49,6 +49,11 @@ namespace coreinit
 
 	void alarm_update();
 
+	// Fire tick (guest timer ticks) of the next scheduled alarm, or uint64 max if none is
+	// pending. Lets the scheduler idle wait clamp its sleep to the alarm deadline so alarm
+	// latency stays at zero. Reads an atomic; no scheduler lock required.
+	uint64 alarm_getSoonestFireTick();
+
 	void MapAlarmExports();
 	void InitializeAlarm();
 }
