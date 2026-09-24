@@ -6,22 +6,6 @@
 uint64 PPCTimer_getRawTsc();
 uint64 PPCTimer_tscToMicroseconds(uint64 us);
 
-// ---------------------------------------------------------------------------
-// TEMPORARY diagnostic instrumentation for the WAIT_REG_MEM (GPU fence) wait
-// path and the GPU-thread CPU/GPU/sync breakdown. This is a measurement build
-// aid only. Set LATTE_FENCE_PROFILING to 0 (or revert this commit) before
-// shipping — when 0 the whole facility compiles out to nothing (zero overhead).
-// See LatteCommandProcessor.cpp (LatteCP_itWaitRegMem) for the collection site.
-// ---------------------------------------------------------------------------
-#define LATTE_FENCE_PROFILING 1
-#if LATTE_FENCE_PROFILING
-// Number of async GPU commands actually executed (popped) by
-// LatteAsyncCommands_checkAndExecute(). Bumped on the Latte thread only, so a
-// plain (non-atomic) counter is safe. Read as a delta by the fence profiler to
-// answer "how often does the in-loop async servicing do real work".
-extern uint64 g_latteAsyncCommandsExecutedDebug;
-#endif
-
 class LattePerfStatTimer
 {
 public:

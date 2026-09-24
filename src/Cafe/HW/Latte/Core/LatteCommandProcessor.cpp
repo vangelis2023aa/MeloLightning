@@ -446,44 +446,6 @@ LatteCMDPtr LatteCP_itNumInstances(LatteCMDPtr cmd, uint32 nWords)
 	return cmd;
 }
 
-#if LATTE_FENCE_PROFILING
-// TEMPORARY diagnostic counters for the WAIT_REG_MEM fence-wait path. All state
-// is touched only on the single Latte GPU thread, so plain (non-atomic) counters
-// are safe and cheap. Nothing here feeds guest state; it only logs. Reported to
-// the log ~once per second. Remove by setting LATTE_FENCE_PROFILING to 0.
-namespace {
-struct FenceWaitProfile {
-	uint64 waitEnterCount=0, stallingWaits=0, totalIterations=0, totalWaitTsc=0;
-	uint64 maxWaitTsc=0, maxIterations=0, shortWaits=0, longWaits=0;
-	uint64 vsyncWorkIters=0, asyncWorkCmds=0, lastReportTsc=0;
-};
-FenceWaitProfile g_fenceProfile;
-constexpr uint64 kFenceShortWaitUs = 50;        // short/long wait boundary
-constexpr uint64 kFenceReportIntervalUs = 1000000; // log cadence (~1s)
-void FenceProfile_MaybeReport() {
-	uint64 nowTsc = PPCTimer_getRawTsc();
-	if (g_fenceProfile.lastReportTsc == 0) g_fenceProfile.lastReportTsc = nowTsc;
-	if (PPCTimer_tscToMicroseconds(nowTsc - g_fenceProfile.lastReportTsc) < kFenceReportIntervalUs) return;
-	g_fenceProfile.lastReportTsc = nowTsc;
-	auto& p = g_fenceProfile;
-	uint64 stalls = p.stallingWaits ? p.stallingWaits : 1;
-	uint64 totalWaitUs = PPCTimer_tscToMicroseconds(p.totalWaitTsc);
-	cemuLog_log(LogType::Force, "[FENCE] enter={} stall={} short={} long={} iters={} it/stall={} vsyncWorkIt={} ({}% of iters) asyncCmds={} totWait={}ms avg={}us max={}us maxIt={}",
-		p.waitEnterCount, p.stallingWaits, p.shortWaits, p.longWaits, p.totalIterations, p.totalIterations/stalls,
-		p.vsyncWorkIters, p.totalIterations ? (p.vsyncWorkIters*100/p.totalIterations):0, p.asyncWorkCmds,
-		totalWaitUs/1000, totalWaitUs/stalls, PPCTimer_tscToMicroseconds(p.maxWaitTsc), p.maxIterations);
-	uint64 frameUs = PPCTimer_tscToMicroseconds(performanceMonitor.gpuTime_frameTime.getPreviousFrameValue());
-	uint64 fenceUs = PPCTimer_tscToMicroseconds(performanceMonitor.gpuTime_fenceTime.getPreviousFrameValue());
-	uint64 idleUs  = PPCTimer_tscToMicroseconds(performanceMonitor.gpuTime_idleTime.getPreviousFrameValue());
-	uint64 asyncUs = PPCTimer_tscToMicroseconds(performanceMonitor.gpuTime_waitForAsync.getPreviousFrameValue());
-	uint64 fd = frameUs ? frameUs : 1;
-	cemuLog_log(LogType::Force, "[FENCE] frame={}us fence={}us({}%) idle={}us({}%) async={}us({}%) work~={}us",
-		frameUs, fenceUs, fenceUs*100/fd, idleUs, idleUs*100/fd, asyncUs, asyncUs*100/fd,
-		frameUs > (fenceUs+idleUs+asyncUs) ? frameUs-(fenceUs+idleUs+asyncUs) : 0);
-}
-} // namespace
-#endif
-
 LatteCMDPtr LatteCP_itWaitRegMem(LatteCMDPtr cmd, uint32 nWords)
 {
 	cemu_assert_debug(nWords == 6);
@@ -518,12 +480,6 @@ LatteCMDPtr LatteCP_itWaitRegMem(LatteCMDPtr cmd, uint32 nWords)
 	{
 		// wait for memory address
 		performanceMonitor.gpuTime_fenceTime.beginMeasuring();
-#if LATTE_FENCE_PROFILING
-		g_fenceProfile.waitEnterCount++;
-		uint64 profWaitStartTsc = PPCTimer_getRawTsc();
-		uint64 profIterCount = 0;
-		uint64 profAsyncBefore = g_latteAsyncCommandsExecutedDebug;
-#endif
 		while (true)
 		{
 			uint32 fenceMemValue = _swapEndianU32(*fencePtr);
@@ -576,39 +532,10 @@ LatteCMDPtr LatteCP_itWaitRegMem(LatteCMDPtr cmd, uint32 nWords)
 			}
 
 			// check if any GPU events happened
-#if LATTE_FENCE_PROFILING
-			profIterCount++;
-			uint64 profVSyncBefore = LatteGPUState.timer_nextVSync;
 			LatteTiming_HandleTimedVsync();
-			if (LatteGPUState.timer_nextVSync != profVSyncBefore)
-				g_fenceProfile.vsyncWorkIters++;
-#else
-			LatteTiming_HandleTimedVsync();
-#endif
 			LatteAsyncCommands_checkAndExecute();
 		}
 		performanceMonitor.gpuTime_fenceTime.endMeasuring();
-#if LATTE_FENCE_PROFILING
-		{
-			uint64 profWaitTsc = PPCTimer_getRawTsc() - profWaitStartTsc;
-			g_fenceProfile.totalIterations += profIterCount;
-			g_fenceProfile.asyncWorkCmds += (g_latteAsyncCommandsExecutedDebug - profAsyncBefore);
-			if (profIterCount > 0)
-			{
-				g_fenceProfile.stallingWaits++;
-				g_fenceProfile.totalWaitTsc += profWaitTsc;
-				if (profWaitTsc > g_fenceProfile.maxWaitTsc)
-					g_fenceProfile.maxWaitTsc = profWaitTsc;
-				if (profIterCount > g_fenceProfile.maxIterations)
-					g_fenceProfile.maxIterations = profIterCount;
-				if (PPCTimer_tscToMicroseconds(profWaitTsc) < kFenceShortWaitUs)
-					g_fenceProfile.shortWaits++;
-				else
-					g_fenceProfile.longWaits++;
-			}
-			FenceProfile_MaybeReport();
-		}
-#endif
 	}
 	else
 	{
