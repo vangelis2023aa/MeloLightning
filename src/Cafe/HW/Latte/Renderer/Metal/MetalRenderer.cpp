@@ -1663,12 +1663,31 @@ void MetalRenderer::draw_execute(uint32 baseVertex, uint32 baseInstance, uint32 
     }
 
     // Visibility result mode
+    // Deduplicated against the encoder state: while an occlusion query is active the offset
+    // advances every draw (each draw gets its own pool slot, see m_currentIndex increment
+    // after the draw), so this genuinely re-issues each draw. While no query is active the
+    // value is always (Disabled, 0) - previously re-submitted on every single draw - so the
+    // dedup skips that redundant encoder call for the vast majority of gameplay draws. The
+    // cached default matches a fresh encoder, and ResetEncoderState() restores it, so a
+    // skipped call never leaves a wrong mode/offset in effect.
+    MTL::VisibilityResultMode visibilityMode;
+    size_t visibilityOffset;
     if (m_occlusionQuery.m_active)
     {
-        renderCommandEncoder->setVisibilityResultMode(MTL::VisibilityResultModeCounting, (m_occlusionQuery.m_currentBuffer * OCCLUSION_QUERY_POOL_SIZE + m_occlusionQuery.m_currentIndex) * sizeof(uint64));
+        visibilityMode = MTL::VisibilityResultModeCounting;
+        visibilityOffset = (m_occlusionQuery.m_currentBuffer * OCCLUSION_QUERY_POOL_SIZE + m_occlusionQuery.m_currentIndex) * sizeof(uint64);
     }
     else
-        renderCommandEncoder->setVisibilityResultMode(MTL::VisibilityResultModeDisabled, 0);
+    {
+        visibilityMode = MTL::VisibilityResultModeDisabled;
+        visibilityOffset = 0;
+    }
+    if (visibilityMode != encoderState.m_visibilityResultMode || visibilityOffset != encoderState.m_visibilityResultOffset)
+    {
+        renderCommandEncoder->setVisibilityResultMode(visibilityMode, visibilityOffset);
+        encoderState.m_visibilityResultMode = visibilityMode;
+        encoderState.m_visibilityResultOffset = visibilityOffset;
+    }
 
     // todo - how does culling behave with rects?
     // right now we just assume that their winding is always CW

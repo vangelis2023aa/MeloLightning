@@ -107,9 +107,38 @@ void LatteAsyncCommand_queueTextureCopy(const LatteSurfaceCopyParam& src, const 
 
 void LatteAsyncCommands_waitUntilAllProcessed()
 {
+	// Blocks the calling (guest CPU) thread until the Latte GPU thread has drained the async
+	// command queue. It does no work itself - it is a pure cross-thread stall - so on
+	// ARM64/iOS a bare _mm_pause() spin burns a whole host core while merely waiting. Ramp
+	// from a short pause-spin (keeps the common microsecond-latency drain fast) through a
+	// brief yield window into small bounded sleeps, so a longer drain stops consuming a core.
+	// The queue is re-checked every iteration and the loop exits the instant it is empty, so
+	// no sleep is inserted once draining has completed. No lock is held while sleeping, so the
+	// GPU thread keeps draining freely (no deadlock), and the cap is small enough that the
+	// caller (a synchronous GX2 surface copy) is never materially delayed.
+	static constexpr uint32 kAsyncDrainSpinIterations  = 64;  // pause-spin for microsecond-latency pickup
+	static constexpr uint32 kAsyncDrainYieldIterations = 32;  // yield-only window before sleeping
+	static constexpr uint32 kAsyncDrainBackoffStepUs   = 50;  // extra sleep granted per further waiting iteration
+	static constexpr uint32 kAsyncDrainBackoffMaxUs    = 250; // hard cap so the copy is never materially delayed
+	uint32 waitIterations = 0;
 	while (LatteAsyncCommandQueue.empty() == false)
 	{
-		_mm_pause();
+		if (waitIterations < kAsyncDrainSpinIterations)
+		{
+			_mm_pause();
+		}
+		else if (waitIterations < kAsyncDrainSpinIterations + kAsyncDrainYieldIterations)
+		{
+			std::this_thread::yield();
+		}
+		else
+		{
+			uint32 sleepUs = (waitIterations - (kAsyncDrainSpinIterations + kAsyncDrainYieldIterations) + 1) * kAsyncDrainBackoffStepUs;
+			if (sleepUs > kAsyncDrainBackoffMaxUs)
+				sleepUs = kAsyncDrainBackoffMaxUs;
+			std::this_thread::sleep_for(std::chrono::microseconds(sleepUs));
+		}
+		waitIterations++;
 	}
 }
 

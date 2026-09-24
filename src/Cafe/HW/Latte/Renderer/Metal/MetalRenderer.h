@@ -74,6 +74,11 @@ struct MetalEncoderState
    	uint32 m_depthSlope = 0;
    	uint32 m_depthClamp = 0;
     bool m_depthClipEnable = true;
+    // Defaults mirror a freshly-created render command encoder (visibility result
+    // disabled at offset 0) so the first draw on a new encoder only re-issues the
+    // mode when it actually differs from that default.
+    MTL::VisibilityResultMode m_visibilityResultMode = MTL::VisibilityResultModeDisabled;
+    size_t m_visibilityResultOffset = 0;
     struct {
         MTL::Buffer* m_buffer;
         size_t m_offset;
