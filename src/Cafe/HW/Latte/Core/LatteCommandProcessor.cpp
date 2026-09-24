@@ -632,16 +632,38 @@ LatteCMDPtr LatteCP_itMemSemaphore(LatteCMDPtr cmd, uint32 nWords)
 	else if(SEM_SIGNAL == 7)
 	{
 		// wait
+		// This is a pure stall: the CP thread blocks here until an external agent (another
+		// ring/thread or the GPU) signals the guest semaphore via SEM_SIGNAL==6. It pumps no
+		// other work, so on ARM/iOS the original pure spin+yield burned a full host core for the
+		// entire wait. We keep a generous spin+yield window so short waits pay zero added latency,
+		// then ramp to short, bounded sleeps only while the semaphore is still zero (i.e. a long
+		// wait that would otherwise be pure waste). The semaphore is re-read every iteration and
+		// the break/compare_exchange condition is unchanged, so this is behavior-preserving; the
+		// only observable effect is a bounded (<=kMemSemaphoreBackoffMaxUs) latency on the tail of
+		// long waits. Not vsync-clamped: this is GPU-queue synchronization, not on the pacing path,
+		// so the small cap alone bounds latency.
+		static constexpr uint32 kMemSemaphoreSpinIterations  = 2000; // tight-spin window for low-latency pickup (matches original)
+		static constexpr uint32 kMemSemaphoreYieldIterations = 2000; // yield-only window before we begin sleeping
+		static constexpr uint32 kMemSemaphoreBackoffStepUs   = 50;   // additional sleep granted per further idle iteration
+		static constexpr uint32 kMemSemaphoreBackoffMaxUs    = 250;  // hard cap so the signal is never materially delayed
 		LatteCP_signalEnterWait();
-		size_t loopCount = 0;
+		uint64 waitIterations = 0;
 		while (true)
 		{
 			uint64le oldVal = semaphoreData->load();
 			if (oldVal == 0)
 			{
-				loopCount++;
-				if (loopCount > 2000)
+				waitIterations++;
+				if (waitIterations <= kMemSemaphoreSpinIterations)
+					_mm_pause();
+				else if (waitIterations <= kMemSemaphoreSpinIterations + kMemSemaphoreYieldIterations)
 					std::this_thread::yield();
+				else
+				{
+					uint64 idleIterations = waitIterations - (kMemSemaphoreSpinIterations + kMemSemaphoreYieldIterations);
+					uint32 sleepUs = (uint32)std::min<uint64>(idleIterations * kMemSemaphoreBackoffStepUs, kMemSemaphoreBackoffMaxUs);
+					std::this_thread::sleep_for(std::chrono::microseconds(sleepUs));
+				}
 				continue;
 			}
 			if (semaphoreData->compare_exchange_strong(oldVal, oldVal - 1))
