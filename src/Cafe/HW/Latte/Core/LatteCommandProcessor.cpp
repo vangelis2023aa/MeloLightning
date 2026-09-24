@@ -479,6 +479,14 @@ LatteCMDPtr LatteCP_itWaitRegMem(LatteCMDPtr cmd, uint32 nWords)
 	if ((word0 & 0x10) != 0)
 	{
 		// wait for memory address
+		// Bounded backoff for the fence wait (see the detailed comment inside the loop).
+		// Constants mirror the already on-device-validated ring-idle backoff in
+		// LatteCP_readU32Deprc so the behavior is the same proven pattern.
+		static constexpr uint32 kWaitRegMemSpinIterations  = 64;   // short pause-spin for immediate fence pickup
+		static constexpr uint32 kWaitRegMemYieldIterations = 32;   // yield window before sleeping
+		static constexpr uint32 kWaitRegMemBackoffStepUs   = 100;  // additional sleep granted per further waiting iteration
+		static constexpr uint32 kWaitRegMemBackoffMaxUs    = 500;  // hard cap (further clamped to the next vsync deadline)
+		uint32 waitIterations = 0;
 		performanceMonitor.gpuTime_fenceTime.beginMeasuring();
 		while (true)
 		{
@@ -534,6 +542,53 @@ LatteCMDPtr LatteCP_itWaitRegMem(LatteCMDPtr cmd, uint32 nWords)
 			// check if any GPU events happened
 			LatteTiming_HandleTimedVsync();
 			LatteAsyncCommands_checkAndExecute();
+
+			// The fence word is written by an external agent (the guest CPU, or an EOP /
+			// mem-write event elsewhere), never by anything this loop does, so the loop can
+			// only poll it - there is no writer-side wakeup to block on, and delaying this
+			// thread cannot delay the writer, so no deadlock is possible. On ARM/iOS a bare
+			// spin here burns a whole host core for the entire wait. Keep a short pause-spin
+			// for low-latency pickup of fences that clear almost immediately, then a brief
+			// yield window, then ramp to short bounded sleeps so a longer wait stops consuming
+			// a core. This is the same pattern already validated on-device in
+			// LatteCP_readU32Deprc. The servicing calls above still run every iteration and
+			// the sleep is clamped to the next simulated vsync deadline, so
+			// LatteTiming_HandleTimedVsync() still fires on time (vsync cadence/pacing
+			// unchanged) and the async queue is still drained each iteration. The fence is
+			// re-read and the compare re-evaluated every iteration, so the exit condition,
+			// memory ordering and command ordering are unaffected.
+			waitIterations++;
+			if (waitIterations < kWaitRegMemSpinIterations)
+			{
+				_mm_pause();
+			}
+			else if (waitIterations < kWaitRegMemSpinIterations + kWaitRegMemYieldIterations)
+			{
+				std::this_thread::yield();
+			}
+			else
+			{
+				uint32 sleepUs = (waitIterations - (kWaitRegMemSpinIterations + kWaitRegMemYieldIterations) + 1) * kWaitRegMemBackoffStepUs;
+				if (sleepUs > kWaitRegMemBackoffMaxUs)
+					sleepUs = kWaitRegMemBackoffMaxUs;
+				// never sleep past the next vsync deadline so vsync still fires on time
+				uint64 nowTick = HighResolutionTimer::now().getTick();
+				uint64 nextVSync = LatteGPUState.timer_nextVSync;
+				if (nextVSync > nowTick)
+				{
+					uint64 untilVSyncUs = HighResolutionTimer::ticksToMicroseconds(nextVSync - nowTick);
+					if (untilVSyncUs < (uint64)sleepUs)
+						sleepUs = (uint32)untilVSyncUs;
+				}
+				else
+				{
+					sleepUs = 0; // vsync already due; do not sleep so servicing runs immediately
+				}
+				if (sleepUs > 0)
+					std::this_thread::sleep_for(std::chrono::microseconds(sleepUs));
+				else
+					std::this_thread::yield();
+			}
 		}
 		performanceMonitor.gpuTime_fenceTime.endMeasuring();
 	}
