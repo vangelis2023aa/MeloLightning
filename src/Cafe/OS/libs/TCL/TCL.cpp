@@ -80,9 +80,25 @@ namespace TCL
 		return true;
 	}
 
+	// Backoff for the ring-buffer space wait below. This wait is pure CPU-ahead-of-GPU
+	// backpressure: the producer (CPU/GX2) has filled the ring and must wait for the GPU
+	// consumer to advance the read index before more commands can be written. On ARM/iOS
+	// _mm_pause() is only a "yield" hint and does not idle the core, so the original pure
+	// spin burned a full core for the entire stall. We keep a very short pause-spin so the
+	// common case (the GPU frees a slot within microseconds) stays low-latency, then yield
+	// briefly, then ramp to short, bounded sleeps so a longer stall stops spinning a core.
+	// The cap is kept small so a command whose space frees up mid-sleep is never materially
+	// delayed. Unlike the GPU-idle wait, this is not clamped to a vsync deadline because it
+	// is not on the vsync/pacing path - the small cap alone bounds any added latency.
+	static constexpr uint32 kTCLRBSpaceSpinIterations  = 64;  // pause-spin iterations for microsecond-latency pickup
+	static constexpr uint32 kTCLRBSpaceYieldIterations = 32;  // yield-only iterations before we begin sleeping
+	static constexpr uint32 kTCLRBSpaceBackoffStepUs   = 50;  // additional sleep granted per further waiting iteration
+	static constexpr uint32 kTCLRBSpaceBackoffMaxUs    = 250; // hard cap so a submission is never materially delayed
+
 	void TCLWaitForRBSpace(uint32be numU32s)
 	{
 		uint32 writeIndex = tclRingBufferA_writeIndex.load(std::memory_order::relaxed);
+		uint32 waitIterations = 0;
 		while (true)
 		{
 			uint32 readIndex = tclRingBufferA_readIndex.load(std::memory_order::acquire);
@@ -91,7 +107,26 @@ namespace TCL
 				distance = TCL_RING_BUFFER_SIZE;
 			if (distance >= numU32s + 1) // assume distance minus one, because we are never allowed to completely wrap around
 				break;
-			_mm_pause();
+
+			// Not enough space yet. Back off progressively; the loop breaks immediately
+			// above once the GPU has freed enough space, so no sleep is inserted once the
+			// command can actually be written.
+			if (waitIterations < kTCLRBSpaceSpinIterations)
+			{
+				_mm_pause();
+			}
+			else if (waitIterations < kTCLRBSpaceSpinIterations + kTCLRBSpaceYieldIterations)
+			{
+				std::this_thread::yield();
+			}
+			else
+			{
+				uint32 sleepUs = (waitIterations - (kTCLRBSpaceSpinIterations + kTCLRBSpaceYieldIterations) + 1) * kTCLRBSpaceBackoffStepUs;
+				if (sleepUs > kTCLRBSpaceBackoffMaxUs)
+					sleepUs = kTCLRBSpaceBackoffMaxUs;
+				std::this_thread::sleep_for(std::chrono::microseconds(sleepUs));
+			}
+			waitIterations++;
 		}
 	}
 

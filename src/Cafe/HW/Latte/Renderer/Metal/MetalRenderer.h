@@ -543,7 +543,7 @@ private:
 	MTL::Buffer* m_nullBuffer;
 	MTL::Texture* m_nullTexture1D;
 	MTL::Texture* m_nullTexture2D;
-	std::map<uint32, MTL::Texture*> m_nullSampledTextures;
+	std::unordered_map<uint32, MTL::Texture*> m_nullSampledTextures;
 
 	// Texture readback
 	MTL::Buffer* m_readbackBuffer = nullptr;

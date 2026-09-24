@@ -28,7 +28,7 @@ public:
 private:
     class MetalRenderer* m_mtlr;
 
-    std::map<uint64, PipelineObject*> m_pipelineCache;
+    std::unordered_map<uint64, PipelineObject*> m_pipelineCache;
     FSpinlock m_pipelineCacheLock;
 
 	std::thread* m_pipelineCacheStoreThread;

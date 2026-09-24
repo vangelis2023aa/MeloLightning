@@ -16,7 +16,7 @@ public:
 private:
     class MetalRenderer* m_mtlr;
 
-    std::map<uint64, MTL::SamplerState*> m_samplerCache;
+    std::unordered_map<uint64, MTL::SamplerState*> m_samplerCache;
 
     uint64 CalculateSamplerHash(const LatteContextRegister& lcr, LatteConst::ShaderType shaderType, uint32 stageSamplerIndex, const _LatteRegisterSetSampler* samplerWords);
 };
