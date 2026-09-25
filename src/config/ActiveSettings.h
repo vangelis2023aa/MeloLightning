@@ -129,6 +129,9 @@ public:
 	[[nodiscard]] static bool ExperimentalAggressiveFramePacing();
 	[[nodiscard]] static bool ExperimentalSkipRedundantResidency();
 	[[nodiscard]] static bool ExperimentalPpcBlockLinking();
+	[[nodiscard]] static bool ExperimentalPipelineCacheFastPath();
+	[[nodiscard]] static bool ExperimentalSamplerCacheFastPath();
+	[[nodiscard]] static bool ExperimentalExtendedCommitThreshold();
 
 private:
 	inline static bool s_setPathsCalled = false;

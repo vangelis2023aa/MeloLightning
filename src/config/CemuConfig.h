@@ -540,6 +540,9 @@ struct CemuConfig
 	ConfigValue<bool> experimental_aggressive_frame_pacing{ false }; // aggressive backoff for flip-wait + ring-space waits
 	ConfigValue<bool> experimental_skip_redundant_residency{ false };// Metal: skip redundant per-encoder useResource() residency
 	ConfigValue<bool> experimental_ppc_block_linking{ false };       // PPC interpreter: link basic blocks to skip per-block hash lookup
+	ConfigValue<bool> experimental_pipeline_cache_fast_path{ false };// Metal: per-draw-pass pipeline + depth-stencil hash memoization
+	ConfigValue<bool> experimental_sampler_cache_fast_path{ false }; // Metal: per-draw-pass sampler-state hash memoization
+	ConfigValue<bool> experimental_extended_commit_threshold{ false };// Metal: raise command-buffer commit threshold (larger batches)
 
 	XMLConfigParser Load(XMLConfigParser& parser);
 	XMLConfigParser Save(XMLConfigParser& parser);

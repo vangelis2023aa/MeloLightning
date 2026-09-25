@@ -316,6 +316,29 @@ struct SettingsView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+
+                    if configManager.renderer.wrappedValue == .metal {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Toggle("Pipeline State Fast-Path", isOn: configManager.experimentalPipelineCacheFastPath)
+                            Text("Metal only. Reuse the last render-pipeline and depth-stencil state within a single draw pass instead of re-hashing and re-looking-them-up on every draw. Cuts per-draw CPU work; if it misbehaves it can cause rendering glitches or crashes.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Toggle("Sampler State Fast-Path", isOn: configManager.experimentalSamplerCacheFastPath)
+                            Text("Metal only. Reuse texture sampler state within a single draw pass instead of re-hashing it for every texture on every draw — this is the most frequent lookup in the renderer. Cuts per-draw CPU work; if it misbehaves it can cause texture-filtering glitches or crashes.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Toggle("Extended Command Batching", isOn: configManager.experimentalExtendedCommitThreshold)
+                            Text("Metal only. Submit larger batches of GPU work per command buffer, reducing how often work is flushed to the GPU. Rendering is unchanged, but larger batches raise GPU latency and memory use, which can shift frame pacing or, in extreme scenes, trigger a GPU timeout.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 } header: {
                     Text("Experimental Performance")
                 } footer: {

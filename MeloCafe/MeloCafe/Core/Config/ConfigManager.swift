@@ -140,6 +140,33 @@ class ConfigManager: ObservableObject {
         }
     }
 
+    var experimentalPipelineCacheFastPath: Binding<Bool> {
+        Binding {
+            self.config.experimentalPipelineCacheFastPath
+        } set: {
+            self.config.experimentalPipelineCacheFastPath = $0
+            self.objectWillChange.send()
+        }
+    }
+
+    var experimentalSamplerCacheFastPath: Binding<Bool> {
+        Binding {
+            self.config.experimentalSamplerCacheFastPath
+        } set: {
+            self.config.experimentalSamplerCacheFastPath = $0
+            self.objectWillChange.send()
+        }
+    }
+
+    var experimentalExtendedCommitThreshold: Binding<Bool> {
+        Binding {
+            self.config.experimentalExtendedCommitThreshold
+        } set: {
+            self.config.experimentalExtendedCommitThreshold = $0
+            self.objectWillChange.send()
+        }
+    }
+
     var renderUpsideDown: Binding<Bool> {
         Binding {
             self.config.renderUpsideDown

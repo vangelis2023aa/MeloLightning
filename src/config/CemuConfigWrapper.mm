@@ -162,6 +162,15 @@ static CPUMode toCPUMode(ObjCCPUMode mode) {
 - (BOOL)experimentalPpcBlockLinking        { return GetConfig().experimental_ppc_block_linking.GetValue(); }
 - (void)setExperimentalPpcBlockLinking:(BOOL)v { GetConfig().experimental_ppc_block_linking = v; autoSave(); }
 
+- (BOOL)experimentalPipelineCacheFastPath  { return GetConfig().experimental_pipeline_cache_fast_path.GetValue(); }
+- (void)setExperimentalPipelineCacheFastPath:(BOOL)v { GetConfig().experimental_pipeline_cache_fast_path = v; autoSave(); }
+
+- (BOOL)experimentalSamplerCacheFastPath   { return GetConfig().experimental_sampler_cache_fast_path.GetValue(); }
+- (void)setExperimentalSamplerCacheFastPath:(BOOL)v { GetConfig().experimental_sampler_cache_fast_path = v; autoSave(); }
+
+- (BOOL)experimentalExtendedCommitThreshold { return GetConfig().experimental_extended_commit_threshold.GetValue(); }
+- (void)setExperimentalExtendedCommitThreshold:(BOOL)v { GetConfig().experimental_extended_commit_threshold = v; autoSave(); }
+
 - (BOOL)renderUpsideDown                   { return GetConfig().render_upside_down.GetValue(); }
 - (void)setRenderUpsideDown:(BOOL)v        { GetConfig().render_upside_down = v; autoSave(); }
 

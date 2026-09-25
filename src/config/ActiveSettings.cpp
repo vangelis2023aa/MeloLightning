@@ -132,6 +132,21 @@ bool ActiveSettings::ExperimentalPpcBlockLinking()
 	return GetConfig().experimental_ppc_block_linking;
 }
 
+bool ActiveSettings::ExperimentalPipelineCacheFastPath()
+{
+	return GetConfig().experimental_pipeline_cache_fast_path;
+}
+
+bool ActiveSettings::ExperimentalSamplerCacheFastPath()
+{
+	return GetConfig().experimental_sampler_cache_fast_path;
+}
+
+bool ActiveSettings::ExperimentalExtendedCommitThreshold()
+{
+	return GetConfig().experimental_extended_commit_threshold;
+}
+
 GraphicAPI ActiveSettings::GetGraphicsAPI()
 {
 	const GraphicAPI api = g_current_game_profile->GetGraphicsAPI().value_or(GetConfig().graphic_api);

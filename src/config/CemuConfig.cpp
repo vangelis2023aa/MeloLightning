@@ -295,6 +295,9 @@ XMLConfigParser CemuConfig::Load(XMLConfigParser& parser)
 	experimental_aggressive_frame_pacing = experimental.get("AggressiveFramePacing", false);
 	experimental_skip_redundant_residency = experimental.get("SkipRedundantResidency", false);
 	experimental_ppc_block_linking = experimental.get("PpcBlockLinking", false);
+	experimental_pipeline_cache_fast_path = experimental.get("PipelineCacheFastPath", false);
+	experimental_sampler_cache_fast_path = experimental.get("SamplerCacheFastPath", false);
+	experimental_extended_commit_threshold = experimental.get("ExtendedCommitThreshold", false);
 
 	// input
 	auto input = parser.get("Input");
@@ -475,6 +478,9 @@ XMLConfigParser CemuConfig::Save(XMLConfigParser& parser)
 	experimental.set("AggressiveFramePacing", experimental_aggressive_frame_pacing.GetValue());
 	experimental.set("SkipRedundantResidency", experimental_skip_redundant_residency.GetValue());
 	experimental.set("PpcBlockLinking", experimental_ppc_block_linking.GetValue());
+	experimental.set("PipelineCacheFastPath", experimental_pipeline_cache_fast_path.GetValue());
+	experimental.set("SamplerCacheFastPath", experimental_sampler_cache_fast_path.GetValue());
+	experimental.set("ExtendedCommitThreshold", experimental_extended_commit_threshold.GetValue());
 
 	// input
 	auto input = config.set("Input");
