@@ -298,6 +298,7 @@ XMLConfigParser CemuConfig::Load(XMLConfigParser& parser)
 	experimental_pipeline_cache_fast_path = experimental.get("PipelineCacheFastPath", false);
 	experimental_sampler_cache_fast_path = experimental.get("SamplerCacheFastPath", false);
 	experimental_extended_commit_threshold = experimental.get("ExtendedCommitThreshold", false);
+	experimental_audio_buffer_blocks = experimental.get("AudioBufferBlocks", 0);
 
 	// input
 	auto input = parser.get("Input");
@@ -481,6 +482,7 @@ XMLConfigParser CemuConfig::Save(XMLConfigParser& parser)
 	experimental.set("PipelineCacheFastPath", experimental_pipeline_cache_fast_path.GetValue());
 	experimental.set("SamplerCacheFastPath", experimental_sampler_cache_fast_path.GetValue());
 	experimental.set("ExtendedCommitThreshold", experimental_extended_commit_threshold.GetValue());
+	experimental.set("AudioBufferBlocks", experimental_audio_buffer_blocks.GetValue());
 
 	// input
 	auto input = config.set("Input");

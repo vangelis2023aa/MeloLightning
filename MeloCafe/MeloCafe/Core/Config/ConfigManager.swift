@@ -167,6 +167,15 @@ class ConfigManager: ObservableObject {
         }
     }
 
+    var experimentalAudioBufferBlocks: Binding<Int> {
+        Binding {
+            Int(self.config.experimentalAudioBufferBlocks)
+        } set: {
+            self.config.experimentalAudioBufferBlocks = Int32($0)
+            self.objectWillChange.send()
+        }
+    }
+
     var renderUpsideDown: Binding<Bool> {
         Binding {
             self.config.renderUpsideDown

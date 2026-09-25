@@ -20,6 +20,7 @@ AudioAPIPtr g_portalAudio;
 std::atomic_int32_t g_padVolume = 0;
 
 uint32 IAudioAPI::s_audioDelay = 2;
+uint32 IAudioAPI::s_audioBufferBlocks = 0;
 std::array<bool, IAudioAPI::AudioAPIEnd> IAudioAPI::s_availableApis{};
 
 IAudioAPI::IAudioAPI(uint32 samplerate, uint32 channels, uint32 samples_per_block, uint32 bits_per_sample)
@@ -83,6 +84,7 @@ void IAudioAPI::InitWFX(sint32 samplerate, sint32 channels, sint32 bits_per_samp
 void IAudioAPI::InitializeStatic()
 {
     s_audioDelay = GetConfig().audio_delay;
+    s_audioBufferBlocks = (uint32)std::max<sint32>(0, GetConfig().experimental_audio_buffer_blocks.GetValue());
 
 #if BOOST_OS_WINDOWS
 	s_availableApis[DirectSound] = true;
@@ -240,6 +242,14 @@ uint32 IAudioAPI::GetAudioDelay() const
 
 uint32 IAudioAPI::GetTargetQueuedBlocks() const
 {
+	// Experimental audio buffering: when set (>0), override the target buffered depth to trade a
+	// little latency for resilience against underruns (the RemoteIO render callback pads silence on a
+	// shortfall, which is the audible crackle/dropout). 0 = disabled = existing audio_delay behavior,
+	// which preserves the desktop per-instance m_audioDelayOverride path unchanged. Clamped to the
+	// ring capacity (kBlockCount); the ring is already allocated for kBlockCount blocks, so no
+	// reallocation is needed. Read on the producer/pacing thread only, never the RT render callback.
+	if (s_audioBufferBlocks > 0)
+		return std::clamp<uint32>(s_audioBufferBlocks, 1, kBlockCount);
 	return std::clamp<uint32>(GetAudioDelay(), 1, kBlockCount);
 }
 

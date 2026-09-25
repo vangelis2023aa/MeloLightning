@@ -543,6 +543,11 @@ struct CemuConfig
 	ConfigValue<bool> experimental_pipeline_cache_fast_path{ false };// Metal: per-draw-pass pipeline + depth-stencil hash memoization
 	ConfigValue<bool> experimental_sampler_cache_fast_path{ false }; // Metal: per-draw-pass sampler-state hash memoization
 	ConfigValue<bool> experimental_extended_commit_threshold{ false };// Metal: raise command-buffer commit threshold (larger batches)
+	// Experimental audio buffering (iOS): target number of 12ms audio blocks kept buffered ahead of
+	// playback. 0 = disabled = existing audio_delay behavior (default ~2 blocks / 24ms). A larger
+	// value trades latency for resilience against underruns (crackle/dropouts). Clamped to the ring
+	// capacity (IAudioAPI::kBlockCount) at use; the ring is already allocated for that many blocks.
+	ConfigValue<sint32> experimental_audio_buffer_blocks{ 0 };
 
 	XMLConfigParser Load(XMLConfigParser& parser);
 	XMLConfigParser Save(XMLConfigParser& parser);

@@ -171,6 +171,9 @@ static CPUMode toCPUMode(ObjCCPUMode mode) {
 - (BOOL)experimentalExtendedCommitThreshold { return GetConfig().experimental_extended_commit_threshold.GetValue(); }
 - (void)setExperimentalExtendedCommitThreshold:(BOOL)v { GetConfig().experimental_extended_commit_threshold = v; autoSave(); }
 
+- (int)experimentalAudioBufferBlocks       { return GetConfig().experimental_audio_buffer_blocks.GetValue(); }
+- (void)setExperimentalAudioBufferBlocks:(int)v { GetConfig().experimental_audio_buffer_blocks = v; autoSave(); }
+
 - (BOOL)renderUpsideDown                   { return GetConfig().render_upside_down.GetValue(); }
 - (void)setRenderUpsideDown:(BOOL)v        { GetConfig().render_upside_down = v; autoSave(); }
 

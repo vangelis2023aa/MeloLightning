@@ -129,6 +129,7 @@ typedef NS_ENUM(NSInteger, ObjCPrecompiledShaderOption) {
 @property (nonatomic) BOOL experimentalPipelineCacheFastPath;
 @property (nonatomic) BOOL experimentalSamplerCacheFastPath;
 @property (nonatomic) BOOL experimentalExtendedCommitThreshold;
+@property (nonatomic) int experimentalAudioBufferBlocks;
 
 @property (nonatomic) BOOL overrideAppGammaPreference;
 @property (nonatomic) float overrideGammaValue;

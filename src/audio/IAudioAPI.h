@@ -95,6 +95,7 @@ protected:
 
 private:
 	static uint32 s_audioDelay;
+	static uint32 s_audioBufferBlocks; // experimental: overrides target buffered depth when >0 (0 = use s_audioDelay)
 	void InitWFX(sint32 samplerate, sint32 channels, sint32 bits_per_sample);
 	static AudioChannels AudioTypeToChannels(AudioType type);
 	static std::wstring GetDeviceFromType(AudioType type);

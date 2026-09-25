@@ -368,6 +368,19 @@ struct SettingsView: View {
                     }
                     
                     Toggle("Microphone", isOn: configManager.microphoneEnabled)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Picker("Audio Buffering (Experimental)", selection: configManager.experimentalAudioBufferBlocks) {
+                            Text("Default").tag(0)
+                            Text("~48 ms").tag(4)
+                            Text("~72 ms").tag(6)
+                            Text("~96 ms").tag(8)
+                            Text("~120 ms").tag(10)
+                        }
+                        Text("Experimental. Buffers more audio ahead of playback to prevent crackling, popping, or dropouts caused by CPU load or timing hiccups. Higher settings add latency (audio lags slightly behind the picture). \"Default\" restores normal behavior. Applies on the next game launch.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                     
                     VStack(alignment: .leading) {
                         Text("TV Volume: \(Int(configManager.tvVolume.wrappedValue))%")
