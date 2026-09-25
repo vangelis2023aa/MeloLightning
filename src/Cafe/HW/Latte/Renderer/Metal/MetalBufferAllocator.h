@@ -125,12 +125,6 @@ private:
 // heap style allocator with released memory being freed after the current command buffer finishes
 class MetalSynchronizedHeapAllocator
 {
-	struct TrackedAllocation
-	{
-		TrackedAllocation(CHAddr allocation) : allocation(allocation) {};
-		CHAddr allocation;
-	};
-
   public:
 	MetalSynchronizedHeapAllocator(class MetalRenderer* mtlRenderer, MTL::ResourceOptions options, size_t minimumBufferAllocSize) : m_mtlr(mtlRenderer), m_chunkedHeap(m_mtlr, options, minimumBufferAllocSize) {}
 	MetalSynchronizedHeapAllocator(const MetalSynchronizedHeapAllocator&) = delete; // disallow copy
@@ -142,6 +136,7 @@ class MetalSynchronizedHeapAllocator
 		uint32 bufferOffset;
 		uint32 size;
 		uint32 bufferIndex;
+		CHAddr heapAllocation; // heap handle kept here so FreeReservation is O(1) (no live-allocation scan)
 	};
 
 	AllocatorReservation* AllocateBufferMemory(uint32 size, uint32 alignment);
@@ -154,8 +149,6 @@ class MetalSynchronizedHeapAllocator
   private:
 	const class MetalRenderer* m_mtlr;
 	MetalBufferChunkedHeap m_chunkedHeap;
-	// allocations
-	std::vector<TrackedAllocation> m_activeAllocations;
 	MemoryPool<AllocatorReservation> m_poolAllocatorReservation{32};
 	// release queue
 	std::unordered_map<MTL::CommandBuffer*, std::vector<CHAddr>> m_releaseQueue;

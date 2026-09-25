@@ -1001,12 +1001,19 @@ void MetalRenderer::texture_notifyDelete(LatteTextureView* textureView)
         if (m_state.m_textures[i] == textureView)
             m_state.m_textures[i] = nullptr;
     }
-    
+
     for (uint32 shaderType = 0; shaderType < METAL_SHADER_TYPE_TOTAL; shaderType++)
     {
         for (uint32 i = 0; i < MAX_MTL_TEXTURES; i++)
             m_state.m_encoderState.m_textures[shaderType][i] = nullptr;
     }
+
+    // Drop any residency tracking that might reference this texture's underlying MTL resource: once
+    // the texture is freed its pointer can be recycled for a new allocation, and a stale entry keyed on
+    // that address could make DeclareResidency wrongly skip a useResource for the new resource. Clearing
+    // over-declares at worst (never under-declares). No-op when experimental_skip_redundant_residency is
+    // OFF, since the map is only ever populated on the ON path.
+    m_residentResources.clear();
 }
 
 void MetalRenderer::texture_copyImageSubData(LatteTexture* src, sint32 srcMip, sint32 effectiveSrcX, sint32 effectiveSrcY, sint32 srcSlice, LatteTexture* dst, sint32 dstMip, sint32 effectiveDstX, sint32 effectiveDstY, sint32 dstSlice, sint32 effectiveCopyWidth, sint32 effectiveCopyHeight, sint32 srcDepth_)

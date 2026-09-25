@@ -1,4 +1,5 @@
 
+#include <bit>
 static uint32 ppc_cmp_and_mask[8] = {
 	0xfffffff0,
 	0xffffff0f,
@@ -23,13 +24,9 @@ static inline uint32 ppc_mask(int MB, int ME)
 
 static inline bool ppc_carry_3(uint32 a, uint32 b, uint32 c)
 {
-	if ((a+b) < a) {
-		return true;
-	}
-	if ((a+b+c) < c) {
-		return true;
-	}
-	return false;
+	// branchless carry-out of the 32-bit sum a+b+c (max value < 2^34, so any carry
+	// shows up in the bits above 32). Equivalent to the previous two-step overflow checks.
+	return (((uint64)a + (uint64)b + (uint64)c) >> 32) != 0;
 }
 
 #define PPC_getBits(__value, __index, __bitCount) ((__value>>(31-__index))&((1<<__bitCount)-1))
@@ -151,12 +148,12 @@ static inline uint64 ConvertToDoubleNoFTZ(uint32 value)
 	}
 	else if (exp == 0 && frac != 0) // denormal
 	{
-		exp = 1023 - 126;
-		do
-		{
-			frac <<= 1;
-			exp -= 1;
-		} while ((frac & 0x00800000) == 0);
+		// normalize the fraction until bit 23 is set. countl_zero gives the shift directly
+		// (frac is a 23-bit value, so its top set bit is at index <= 22), replacing the
+		// original bit-at-a-time loop with a single clz.
+		const uint64 shift = (uint64)std::countl_zero((uint32)frac) - 8;
+		frac <<= shift;
+		exp = (1023 - 126) - shift;
 
 		return ((x & 0x80000000) << 32) | (exp << 52) | ((frac & 0x007fffff) << 29);
 	}

@@ -8,8 +8,6 @@ void memory_logModifiedMemoryRanges();
 void memory_enableOverlayArena();
 void memory_enableHBLELFCodeArea();
 uint32 memory_getVirtualOffsetFromPointer(void* ptr);
-uint8* memory_getPointerFromVirtualOffset(uint32 virtualOffset);
-uint8* memory_getPointerFromVirtualOffsetAllowNull(uint32 virtualOffset);
 
 uint8* memory_getPointerFromPhysicalOffset(uint32 physicalOffset);
 
@@ -17,6 +15,21 @@ uint32 memory_virtualToPhysical(uint32 virtualOffset);
 uint32 memory_physicalToVirtual(uint32 physicalOffset);
 
 extern uint8* memory_base; // points to base of PowerPC address space
+
+// Defined here rather than in MMU.cpp so the interpreter's load/store path, which calls
+// this for every emulated memory access, can inline it without relying on LTO to fold
+// away an out-of-line call. (MPTR_NULL is 0, so the AllowNull null-check is unchanged.)
+inline uint8* memory_getPointerFromVirtualOffset(uint32 virtualOffset)
+{
+	return memory_base + virtualOffset;
+}
+
+inline uint8* memory_getPointerFromVirtualOffsetAllowNull(uint32 virtualOffset)
+{
+	if (virtualOffset == 0)
+		return nullptr;
+	return memory_base + virtualOffset;
+}
 
 enum class MMU_MEM_AREA_ID
 {
