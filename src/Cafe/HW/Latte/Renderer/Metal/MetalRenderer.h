@@ -403,6 +403,13 @@ public:
 
     void CopyBufferToBuffer(MTL::Buffer* src, uint32 srcOffset, MTL::Buffer* dst, uint32 dstOffset, uint32 size, MTL::RenderStages after, MTL::RenderStages before);
 
+    // Experimental MetalFX: upscale sourceTexture to targetWidth x targetHeight via the spatial scaler,
+    // returning the upscaled output texture. Any failure (feature off, unsupported, configure failed,
+    // or source already >= target) returns sourceTexture unchanged so the caller's present path is
+    // never disturbed. Must be called with NO open encoder-neutral state assumptions; it ends the
+    // current encoder internally before MetalFX encodes its own pass. GPU-thread only.
+    MTL::Texture* TryApplyMetalFX(MTL::Texture* sourceTexture, sint32 targetWidth, sint32 targetHeight);
+
     // Getters
     bool GetPositionInvariance() const
     {
@@ -610,6 +617,16 @@ private:
 
 	// Bumped at the start of every draw sequence; see GetDrawPassGeneration(). GPU-thread only.
 	uint32 m_drawPassGeneration = 1;
+
+	// Experimental MetalFX spatial upscaling. All state is latched once at renderer construction from
+	// config (in the settings-plumbing commit) and never re-read afterwards, so a per-frame present is
+	// a single bool test when the feature is off. m_metalFXUpscaler is allocated only when the feature
+	// is enabled AND the device supports MetalFX; it stays nullptr otherwise, so the present path is
+	// byte-identical to the pre-MetalFX renderer. See TryApplyMetalFX().
+	class MetalFXSpatialUpscaler* m_metalFXUpscaler = nullptr;
+	bool m_metalFXActive = false;         // master latch: false => present path unchanged
+	sint32 m_metalFXRenderScale = 100;    // internal-resolution percentage (100 == native, no scaling)
+	sint32 m_metalFXColorProcessing = 0;  // 0 Perceptual / 1 Linear / 2 HDR (SpatialScalerColorProcessingMode)
 
 	// State
 	MetalState m_state;

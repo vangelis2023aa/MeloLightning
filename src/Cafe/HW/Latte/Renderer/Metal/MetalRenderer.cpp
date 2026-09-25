@@ -9,6 +9,7 @@
 #include "Cafe/HW/Latte/Renderer/Metal/MetalPipelineCache.h"
 #include "Cafe/HW/Latte/Renderer/Metal/MetalDepthStencilCache.h"
 #include "Cafe/HW/Latte/Renderer/Metal/MetalSamplerCache.h"
+#include "Cafe/HW/Latte/Renderer/Metal/MetalFXUpscaler.h"
 #include "Cafe/HW/Latte/Renderer/Metal/LatteTextureReadbackMtl.h"
 #include "Cafe/HW/Latte/Renderer/Metal/MetalQuery.h"
 #include "Cafe/HW/Latte/Renderer/Metal/LatteToMtl.h"
@@ -301,6 +302,15 @@ MetalRenderer::MetalRenderer()
     // HACK: for some reason, this variable ends up being initialized to some garbage data, even though its declared as bool m_captureFrame = false;
     m_occlusionQuery.m_lastCommandBuffer = nullptr;
     m_captureFrame = false;
+
+    // Experimental MetalFX: dormant in this commit. The latch stays OFF (m_metalFXActive == false,
+    // m_metalFXUpscaler == nullptr) so the present path is exactly the pre-MetalFX renderer. The
+    // config read + upscaler allocation are added in the settings-plumbing commit; until then this
+    // block only documents the intended init point.
+    m_metalFXActive = false;
+    m_metalFXRenderScale = 100;
+    m_metalFXColorProcessing = 0;
+    m_metalFXUpscaler = nullptr;
 }
 
 MetalRenderer::~MetalRenderer()
@@ -323,6 +333,10 @@ MetalRenderer::~MetalRenderer()
     delete m_depthStencilCache;
     delete m_samplerCache;
     delete m_memoryManager;
+
+    // Experimental MetalFX: releases the scaler + owned intermediate textures. nullptr when the
+    // feature was never enabled, so this is a no-op in the default configuration.
+    delete m_metalFXUpscaler;
 
     m_nullBuffer->release();
     m_nullTexture1D->release();
@@ -514,6 +528,48 @@ void MetalRenderer::HandleScreenshotRequest(LatteTextureView* texView, bool padV
         SaveScreenshot(rgb_data, width, height, !padView);
 }
 
+MTL::Texture* MetalRenderer::TryApplyMetalFX(MTL::Texture* sourceTexture, sint32 targetWidth, sint32 targetHeight)
+{
+    if (!sourceTexture || !m_metalFXUpscaler)
+        return sourceTexture;
+
+    const uint32 inputWidth = (uint32)sourceTexture->width();
+    const uint32 inputHeight = (uint32)sourceTexture->height();
+    const uint32 outputWidth = (uint32)std::max<sint32>(targetWidth, 1);
+    const uint32 outputHeight = (uint32)std::max<sint32>(targetHeight, 1);
+
+    // Spatial scaling only makes sense when upscaling. If the source already covers the target (e.g.
+    // render scale left at 100% or a downscale case), pass the source through untouched so the present
+    // path is unchanged.
+    if (inputWidth >= outputWidth && inputHeight >= outputHeight)
+        return sourceTexture;
+
+    const MTL::PixelFormat colorFormat = sourceTexture->pixelFormat();
+
+    // (Re)configure lazily; cheap no-op when the key is unchanged. On any failure the upscaler releases
+    // its partial state and returns false, and we fall back to the original source texture.
+    if (!m_metalFXUpscaler->Configure(inputWidth, inputHeight, outputWidth, outputHeight, colorFormat, m_metalFXColorProcessing))
+        return sourceTexture;
+
+    MTL::Texture* inputTexture = m_metalFXUpscaler->GetInputTexture();
+    MTL::Texture* outputTexture = m_metalFXUpscaler->GetOutputTexture();
+    if (!inputTexture || !outputTexture)
+        return sourceTexture;
+
+    // Copy the reduced-resolution present source into the scaler's owned input texture, then let
+    // MetalFX encode its own pass producing the full-resolution output. All three textures are tracked
+    // (default hazard tracking) and everything is recorded onto the SAME command buffer, so Metal
+    // orders copy-in -> scale -> downstream sample automatically without an explicit fence. MetalFX
+    // must encode with no open encoder, so we end the blit encoder first.
+    GetBlitCommandEncoder()->copyFromTexture(sourceTexture, 0, 0, MTL::Origin(0, 0, 0), MTL::Size(inputWidth, inputHeight, 1),
+                                             inputTexture, 0, 0, MTL::Origin(0, 0, 0));
+    EndEncoding();
+
+    m_metalFXUpscaler->Encode(GetCommandBuffer());
+
+    return outputTexture;
+}
+
 void MetalRenderer::DrawBackbufferQuad(LatteTextureView* texView, RendererOutputShader* shader, bool useLinearTexFilter,
                                 sint32 imageX, sint32 imageY, sint32 imageWidth, sint32 imageHeight,
                                 bool padView, bool clearBackground)
@@ -522,6 +578,14 @@ void MetalRenderer::DrawBackbufferQuad(LatteTextureView* texView, RendererOutput
         return;
 
     MTL::Texture* presentTexture = static_cast<LatteTextureViewMtl*>(texView)->GetRGBAView();
+
+    // Experimental MetalFX spatial upscale (main window only). Dormant unless the feature is latched
+    // ON and the upscaler was allocated; when engaged it upscales the (reduced-resolution) present
+    // source into a full-resolution intermediate that the output-shader blit below samples exactly as
+    // it would the original. Any failure returns presentTexture unchanged, so the present path is
+    // never disturbed. Gated to !padView so the scaler is not recreated for the differently sized DRC.
+    if (m_metalFXActive && m_metalFXUpscaler && !padView)
+        presentTexture = TryApplyMetalFX(presentTexture, imageWidth, imageHeight);
 
     // Create render pass
     auto& layer = GetLayer(!padView);

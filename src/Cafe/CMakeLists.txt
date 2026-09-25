@@ -584,6 +584,8 @@ if(ENABLE_METAL)
         HW/Latte/Renderer/Metal/MetalCppImpl.cpp
         HW/Latte/Renderer/Metal/MetalDepthStencilCache.cpp
         HW/Latte/Renderer/Metal/MetalDepthStencilCache.h
+        HW/Latte/Renderer/Metal/MetalFXUpscaler.cpp
+        HW/Latte/Renderer/Metal/MetalFXUpscaler.h
         HW/Latte/Renderer/Metal/MetalLayer.h
         HW/Latte/Renderer/Metal/MetalLayer.mm
         HW/Latte/Renderer/Metal/MetalLayerHandle.cpp
@@ -619,6 +621,7 @@ if(ENABLE_METAL)
     target_link_libraries(CemuCafe PRIVATE
         "-framework Metal"
         "-framework QuartzCore"
+        "-weak_framework MetalFX"
     )
 endif()
 
