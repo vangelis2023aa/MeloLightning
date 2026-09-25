@@ -30,6 +30,20 @@ std::vector<TexMemOccupancyEntry> list_texMemOccupancyBucket[TEX_OCCUPANCY_BUCKE
 std::atomic_bool s_refreshTextureQueryList;
 std::vector<LatteTextureInformation> s_cacheInfoList;
 
+// Experimental MetalFX internal render-resolution scale (percentage). 0 = disabled (default); a
+// value in (0,100) shrinks newly-created render targets. See LatteTexture_setMetalFXRenderScalePercent().
+static std::atomic<sint32> s_metalFXRenderScalePercent{ 0 };
+
+void LatteTexture_setMetalFXRenderScalePercent(sint32 percent)
+{
+	s_metalFXRenderScalePercent.store(percent, std::memory_order_relaxed);
+}
+
+sint32 LatteTexture_getMetalFXRenderScalePercent()
+{
+	return s_metalFXRenderScalePercent.load(std::memory_order_relaxed);
+}
+
 std::vector<LatteTextureInformation> LatteTexture_QueryCacheInfo()
 {
 	// raise request flag to refresh cache
@@ -1327,6 +1341,33 @@ LatteTexture::LatteTexture(Latte::E_DIM dim, MPTR physAddress, MPTR physMipAddre
 			if (rule.overwrite_settings.anistropic_value != -1)
 			{
 				this->overwriteInfo.anisotropicLevel = rule.overwrite_settings.anistropic_value;
+			}
+		}
+	}
+
+	// Experimental MetalFX internal-resolution scaling. When the Metal renderer has MetalFX spatial
+	// upscaling active it publishes a sub-100% scale here. We shrink the backing dimensions of
+	// newly-created render targets through the SAME overwriteInfo / GetEffectiveSize() path that
+	// graphic-pack resolution rules use, so the render-target, viewport and scissor scaling machinery
+	// already honors it with no other change. Only render targets are touched (both color and depth,
+	// so they stay the same effective size); textures a graphic pack already resized are left alone;
+	// dimensions never drop below 1px. When the scale is 0 (default/disabled) this is a no-op and the
+	// texture is created at native resolution exactly as before.
+	if (isRenderTarget && !this->overwriteInfo.hasResolutionOverwrite)
+	{
+		const sint32 scalePercent = LatteTexture_getMetalFXRenderScalePercent();
+		if (scalePercent > 0 && scalePercent < 100)
+		{
+			sint32 scaledWidth = (sint32)(((sint64)width * scalePercent + 50) / 100);
+			sint32 scaledHeight = (sint32)(((sint64)height * scalePercent + 50) / 100);
+			if (scaledWidth < 1) scaledWidth = 1;
+			if (scaledHeight < 1) scaledHeight = 1;
+			if (scaledWidth != (sint32)width || scaledHeight != (sint32)height)
+			{
+				this->overwriteInfo.hasResolutionOverwrite = true;
+				this->overwriteInfo.width = scaledWidth;
+				this->overwriteInfo.height = scaledHeight;
+				this->overwriteInfo.depth = depth;
 			}
 		}
 	}

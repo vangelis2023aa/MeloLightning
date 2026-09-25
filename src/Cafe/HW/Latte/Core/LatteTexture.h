@@ -341,6 +341,14 @@ bool LatteTexture_doesEffectiveRescaleRatioMatch(LatteTexture* texture1, sint32 
 void LatteTexture_scaleToEffectiveSize(LatteTexture* texture, sint32* x, sint32* y, sint32 mipLevel);
 uint64 LatteTexture_getNextUpdateEventCounter();
 
+// Experimental MetalFX internal-resolution scale. 0 (default) = disabled: render targets are created
+// at their native size and behavior is unchanged. A value in (0,100) causes newly-created render
+// targets to be allocated at that percentage of their native dimensions (via the existing
+// resolution-overwrite / effective-size path) so the game renders cheaper before being upscaled.
+// Set once by the Metal renderer at construction and reset to 0 at destruction.
+void LatteTexture_setMetalFXRenderScalePercent(sint32 percent);
+sint32 LatteTexture_getMetalFXRenderScalePercent();
+
 void LatteTexture_UpdateCacheFromDynamicTextures(LatteTexture* texture);
 void LatteTexture_MarkConnectedTexturesForReloadFromDynamicTextures(LatteTexture* texture);
 void LatteTexture_TrackTextureGPUWrite(LatteTexture* texture, uint32 slice, uint32 mip, uint64 eventCounter);

@@ -337,6 +337,11 @@ MetalRenderer::MetalRenderer()
             }
         }
     }
+
+    // Experimental MetalFX: publish the internal render-scale to the Latte texture layer so render
+    // targets are created at the reduced resolution. 0 when MetalFX is inactive => native resolution,
+    // no change. This is the only place the scale is armed; it is reset to 0 in the destructor.
+    LatteTexture_setMetalFXRenderScalePercent(m_metalFXActive ? m_metalFXRenderScale : 0);
 }
 
 MetalRenderer::~MetalRenderer()
@@ -360,8 +365,10 @@ MetalRenderer::~MetalRenderer()
     delete m_samplerCache;
     delete m_memoryManager;
 
-    // Experimental MetalFX: releases the scaler + owned intermediate textures. nullptr when the
-    // feature was never enabled, so this is a no-op in the default configuration.
+    // Experimental MetalFX: stop scaling newly-created render targets before teardown, then release
+    // the scaler + owned intermediate textures. nullptr when the feature was never enabled, so this
+    // is a no-op in the default configuration.
+    LatteTexture_setMetalFXRenderScalePercent(0);
     delete m_metalFXUpscaler;
 
     m_nullBuffer->release();
