@@ -3,6 +3,7 @@
 #include "HW/Latte/ISA/RegDefines.h"
 #include "HW/Latte/Renderer/Metal/LatteToMtl.h"
 #include "Metal/MTLDepthStencil.hpp"
+#include "config/ActiveSettings.h"
 
 MetalDepthStencilCache::~MetalDepthStencilCache()
 {
@@ -15,11 +16,27 @@ MetalDepthStencilCache::~MetalDepthStencilCache()
 
 MTL::DepthStencilState* MetalDepthStencilCache::GetDepthStencilState(const LatteContextRegister& lcr, bool hasDepthStencilAttachment)
 {
+    // Experimental per-draw-pass fast path (shares the pipeline-cache toggle). All inputs to
+    // CalculateDepthStencilHash are context registers, frozen for the whole draw pass, so within one
+    // generation the only variable is hasDepthStencilAttachment. When both match the previous draw,
+    // reuse the resolved state directly; any mismatch (or toggle OFF) uses the normal hash+probe path.
+    const bool fastPathOn = ActiveSettings::ExperimentalPipelineCacheFastPath();
+    uint32 passGeneration = 0;
+    if (fastPathOn)
+    {
+        passGeneration = m_mtlr->GetDrawPassGeneration();
+        if (m_fpDepthStencilState &&
+            passGeneration == m_fpGeneration &&
+            hasDepthStencilAttachment == m_fpHasDepthStencilAttachment)
+        {
+            return m_fpDepthStencilState;
+        }
+    }
+
     uint64 stateHash = CalculateDepthStencilHash(lcr, hasDepthStencilAttachment);
     auto& depthStencilState = m_depthStencilCache[stateHash];
-    if (depthStencilState)
-        return depthStencilState;
-
+    if (!depthStencilState)
+    {
 	// Depth stencil state
 	bool depthEnable = hasDepthStencilAttachment && lcr.DB_DEPTH_CONTROL.get_Z_ENABLE();
 	auto depthFunc = lcr.DB_DEPTH_CONTROL.get_Z_FUNC();
@@ -84,6 +101,14 @@ MTL::DepthStencilState* MetalDepthStencilCache::GetDepthStencilState(const Latte
 	}
 
 	depthStencilState = m_mtlr->GetDevice()->newDepthStencilState(desc);
+    }
+
+    if (fastPathOn)
+    {
+        m_fpGeneration = passGeneration;
+        m_fpHasDepthStencilAttachment = hasDepthStencilAttachment;
+        m_fpDepthStencilState = depthStencilState;
+    }
 
 	return depthStencilState;
 }

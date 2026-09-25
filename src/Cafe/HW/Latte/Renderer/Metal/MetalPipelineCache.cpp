@@ -114,39 +114,85 @@ MetalPipelineCache::~MetalPipelineCache()
 
 PipelineObject* MetalPipelineCache::GetRenderPipelineState(const LatteFetchShader* fetchShader, const LatteDecompilerShader* vertexShader, const LatteDecompilerShader* geometryShader, const LatteDecompilerShader* pixelShader, const MetalAttachmentsInfo& lastUsedAttachmentsInfo, const MetalAttachmentsInfo& activeAttachmentsInfo, Vector2i extend, uint32 indexCount, const LatteContextRegister& lcr)
 {
+    // Experimental per-draw-pass fast path. Within one CP draw pass every input to
+    // CalculatePipelineHash is frozen except the vertex-buffer strides and the primitive type — any
+    // context/resource/sampler write ends the pass and advances m_drawPassGeneration. So if the
+    // shader set, a cheap stride signature and the primitive type all match the pipeline resolved for
+    // a previous draw at the SAME generation, reuse it directly and skip both the full hash mix and
+    // the unordered_map probe. Any mismatch falls through to the exact code path used when the toggle
+    // is OFF, so a wrong guess can never resolve the wrong pipeline (worst case: one extra recompute).
+    const bool fastPathOn = ActiveSettings::ExperimentalPipelineCacheFastPath();
+    uint32 passGeneration = 0;
+    uint64 strideSig = 0;
+    uint32 primitiveType = 0;
+    if (fastPathOn)
+    {
+        passGeneration = m_mtlr->GetDrawPassGeneration();
+        for (auto& group : fetchShader->bufferGroups)
+        {
+            strideSig = std::rotl<uint64>(strideSig, 7);
+            strideSig += (uint64)group.getCurrentBufferStride(lcr.GetRawView()) * 3 + 1;
+        }
+        primitiveType = lcr.GetRawView()[mmVGT_PRIMITIVE_TYPE];
+
+        if (m_fpPipelineObj &&
+            passGeneration == m_fpGeneration &&
+            fetchShader == m_fpFetchShader &&
+            vertexShader == m_fpVertexShader &&
+            geometryShader == m_fpGeometryShader &&
+            pixelShader == m_fpPixelShader &&
+            strideSig == m_fpStrideSig &&
+            primitiveType == m_fpPrimitiveType)
+        {
+            return m_fpPipelineObj;
+        }
+    }
+
     uint64 hash = CalculatePipelineHash(fetchShader, vertexShader, geometryShader, pixelShader, lastUsedAttachmentsInfo, activeAttachmentsInfo, lcr);
     PipelineObject*& pipelineObj = m_pipelineCache[hash];
-    if (pipelineObj)
-        return pipelineObj;
+    if (!pipelineObj)
+    {
+        pipelineObj = new PipelineObject();
 
-    pipelineObj = new PipelineObject();
+        MetalPipelineCompiler* compiler = new MetalPipelineCompiler(m_mtlr, *pipelineObj);
+        compiler->InitFromState(fetchShader, vertexShader, geometryShader, pixelShader, lastUsedAttachmentsInfo, activeAttachmentsInfo, lcr);
 
-    MetalPipelineCompiler* compiler = new MetalPipelineCompiler(m_mtlr, *pipelineObj);
-    compiler->InitFromState(fetchShader, vertexShader, geometryShader, pixelShader, lastUsedAttachmentsInfo, activeAttachmentsInfo, lcr);
+        bool allowAsyncCompile = false;
+        if (GetConfig().async_compile)
+            allowAsyncCompile = IsAsyncPipelineAllowed(activeAttachmentsInfo, extend, indexCount);
 
-    bool allowAsyncCompile = false;
-    if (GetConfig().async_compile)
-		allowAsyncCompile = IsAsyncPipelineAllowed(activeAttachmentsInfo, extend, indexCount);
+        if (allowAsyncCompile)
+        {
+            if (!g_compilePipelineThreadInit)
+            {
+                initCompileThread();
+                g_compilePipelineThreadInit = true;
+            }
 
-	if (allowAsyncCompile)
-	{
-	    if (!g_compilePipelineThreadInit)
-		{
-			initCompileThread();
-			g_compilePipelineThreadInit = true;
-		}
+            queuePipeline(compiler);
+        }
+        else
+        {
+            // Also force compile to ensure that the pipeline is ready
+            cemu_assert_debug(compiler->Compile(true, true, true));
+            delete compiler;
+        }
 
-		queuePipeline(compiler);
-	}
-	else
-	{
-	    // Also force compile to ensure that the pipeline is ready
-        cemu_assert_debug(compiler->Compile(true, true, true));
-        delete compiler;
-	}
+        // Save to cache
+        AddCurrentStateToCache(hash, lastUsedAttachmentsInfo);
+    }
 
-	// Save to cache
-    AddCurrentStateToCache(hash, lastUsedAttachmentsInfo);
+    if (fastPathOn)
+    {
+        m_fpGeneration = passGeneration;
+        m_fpFetchShader = fetchShader;
+        m_fpVertexShader = vertexShader;
+        m_fpGeometryShader = geometryShader;
+        m_fpPixelShader = pixelShader;
+        m_fpStrideSig = strideSig;
+        m_fpPrimitiveType = primitiveType;
+        m_fpPipelineObj = pipelineObj;
+    }
 
     return pipelineObj;
 }

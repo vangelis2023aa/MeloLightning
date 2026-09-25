@@ -1404,6 +1404,11 @@ void MetalRenderer::draw_beginSequence()
 {
     m_state.m_skipDrawSequence = false;
 
+    // New draw sequence = new CP draw pass boundary: any context/resource/sampler write since the
+    // last pass ended it, so advance the per-pass generation. Experimental state-cache fast-paths
+    // use this token to detect that nothing feeding their hashes has changed within a pass.
+    m_drawPassGeneration++;
+
     bool streamoutEnable = LatteGPUState.contextRegister[mmVGT_STRMOUT_EN] != 0;
 
     // update shader state

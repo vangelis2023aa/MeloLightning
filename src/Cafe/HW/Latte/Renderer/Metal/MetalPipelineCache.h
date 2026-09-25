@@ -31,6 +31,23 @@ private:
     std::unordered_map<uint64, PipelineObject*> m_pipelineCache;
     FSpinlock m_pipelineCacheLock;
 
+	// Experimental per-draw-pass fast path (experimental_pipeline_cache_fast_path). Remembers the
+	// pipeline resolved for the last draw so a following draw in the SAME draw pass can be served
+	// without recomputing CalculatePipelineHash or probing m_pipelineCache. Reused only when the
+	// draw-pass generation still matches and every hash input that can vary within a pass (the four
+	// shader pointers, a vertex-stride signature and the primitive type) is unchanged; any mismatch
+	// falls through to the normal hash+probe path, so a stale entry can never resolve a wrong
+	// pipeline. GPU-thread only (same thread as GetRenderPipelineState); untouched when the toggle
+	// is OFF (m_fpPipelineObj stays null → the fast path is never entered).
+	uint32 m_fpGeneration = 0;
+	const LatteFetchShader* m_fpFetchShader = nullptr;
+	const LatteDecompilerShader* m_fpVertexShader = nullptr;
+	const LatteDecompilerShader* m_fpGeometryShader = nullptr;
+	const LatteDecompilerShader* m_fpPixelShader = nullptr;
+	uint64 m_fpStrideSig = 0;
+	uint32 m_fpPrimitiveType = 0;
+	PipelineObject* m_fpPipelineObj = nullptr;
+
 	std::thread* m_pipelineCacheStoreThread;
 
 	class FileCache* s_cache;

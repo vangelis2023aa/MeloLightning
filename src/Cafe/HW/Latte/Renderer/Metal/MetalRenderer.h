@@ -189,6 +189,15 @@ public:
         return m_device;
     }
 
+	// Monotonic per-draw-pass token. Bumped once at the start of every draw sequence
+	// (draw_beginSequence), which is exactly where any context/resource/sampler change forces a new
+	// CP draw pass. State caches keyed on this value can prove "nothing that feeds this hash changed
+	// since the last draw in this pass". Only read by experimental per-pass fast-paths; unused when
+	// those toggles are OFF.
+	uint32 GetDrawPassGeneration() const {
+        return m_drawPassGeneration;
+    }
+
 	void InitializeLayer(const Vector2i& size, bool mainWindow);
 	void ShutdownLayer(bool mainWindow);
 	void ResizeLayer(const Vector2i& size, bool mainWindow);
@@ -598,6 +607,9 @@ private:
     uint32 m_recordedDrawcalls;
     uint32 m_defaultCommitTreshlod;
     uint32 m_commitTreshold;
+
+	// Bumped at the start of every draw sequence; see GetDrawPassGeneration(). GPU-thread only.
+	uint32 m_drawPassGeneration = 1;
 
 	// State
 	MetalState m_state;
