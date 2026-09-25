@@ -303,14 +303,40 @@ MetalRenderer::MetalRenderer()
     m_occlusionQuery.m_lastCommandBuffer = nullptr;
     m_captureFrame = false;
 
-    // Experimental MetalFX: dormant in this commit. The latch stays OFF (m_metalFXActive == false,
-    // m_metalFXUpscaler == nullptr) so the present path is exactly the pre-MetalFX renderer. The
-    // config read + upscaler allocation are added in the settings-plumbing commit; until then this
-    // block only documents the intended init point.
+    // Experimental MetalFX: latch the feature state ONCE, here at construction, from config. The
+    // upscaler is allocated only when the user enabled it AND asked for a sub-native internal
+    // resolution (< 100%) AND the device actually supports MetalFX. In every other case
+    // (feature off, 100% = native, unsupported device) m_metalFXUpscaler stays nullptr and
+    // m_metalFXActive stays false, so the present path is byte-identical to the pre-MetalFX
+    // renderer. Nothing is re-read per frame; the present hot path is a single bool test.
     m_metalFXActive = false;
     m_metalFXRenderScale = 100;
     m_metalFXColorProcessing = 0;
     m_metalFXUpscaler = nullptr;
+
+    if (ActiveSettings::ExperimentalMetalFXEnable())
+    {
+        sint32 scale = ActiveSettings::ExperimentalMetalFXRenderScale();
+        if (scale < 25) scale = 25;
+        else if (scale > 100) scale = 100;
+
+        // 100% means "native, no upscale" -> leave MetalFX entirely off so behavior is unchanged.
+        if (scale < 100)
+        {
+            if (MetalFXSpatialUpscaler::IsSupported(m_device))
+            {
+                m_metalFXRenderScale = scale;
+                m_metalFXColorProcessing = ActiveSettings::ExperimentalMetalFXColorProcessing();
+                m_metalFXUpscaler = new MetalFXSpatialUpscaler(m_device);
+                m_metalFXActive = true;
+                cemuLog_log(LogType::Force, "MetalFX: experimental spatial upscaling enabled at {}% internal resolution", m_metalFXRenderScale);
+            }
+            else
+            {
+                cemuLog_log(LogType::Force, "MetalFX: requested but not supported on this device; using normal rendering");
+            }
+        }
+    }
 }
 
 MetalRenderer::~MetalRenderer()

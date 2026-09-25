@@ -176,6 +176,33 @@ class ConfigManager: ObservableObject {
         }
     }
 
+    var experimentalMetalFXEnable: Binding<Bool> {
+        Binding {
+            self.config.experimentalMetalFXEnable
+        } set: {
+            self.config.experimentalMetalFXEnable = $0
+            self.objectWillChange.send()
+        }
+    }
+
+    var experimentalMetalFXRenderScale: Binding<Int> {
+        Binding {
+            Int(self.config.experimentalMetalFXRenderScale)
+        } set: {
+            self.config.experimentalMetalFXRenderScale = Int32($0)
+            self.objectWillChange.send()
+        }
+    }
+
+    var experimentalMetalFXColorProcessing: Binding<Int> {
+        Binding {
+            Int(self.config.experimentalMetalFXColorProcessing)
+        } set: {
+            self.config.experimentalMetalFXColorProcessing = Int32($0)
+            self.objectWillChange.send()
+        }
+    }
+
     var renderUpsideDown: Binding<Bool> {
         Binding {
             self.config.renderUpsideDown

@@ -174,6 +174,15 @@ static CPUMode toCPUMode(ObjCCPUMode mode) {
 - (int)experimentalAudioBufferBlocks       { return GetConfig().experimental_audio_buffer_blocks.GetValue(); }
 - (void)setExperimentalAudioBufferBlocks:(int)v { GetConfig().experimental_audio_buffer_blocks = v; autoSave(); }
 
+- (BOOL)experimentalMetalFXEnable          { return GetConfig().experimental_metalfx_enable.GetValue(); }
+- (void)setExperimentalMetalFXEnable:(BOOL)v { GetConfig().experimental_metalfx_enable = v; autoSave(); }
+
+- (int)experimentalMetalFXRenderScale      { return GetConfig().experimental_metalfx_render_scale.GetValue(); }
+- (void)setExperimentalMetalFXRenderScale:(int)v { GetConfig().experimental_metalfx_render_scale = v; autoSave(); }
+
+- (int)experimentalMetalFXColorProcessing  { return GetConfig().experimental_metalfx_color_processing.GetValue(); }
+- (void)setExperimentalMetalFXColorProcessing:(int)v { GetConfig().experimental_metalfx_color_processing = v; autoSave(); }
+
 - (BOOL)renderUpsideDown                   { return GetConfig().render_upside_down.GetValue(); }
 - (void)setRenderUpsideDown:(BOOL)v        { GetConfig().render_upside_down = v; autoSave(); }
 

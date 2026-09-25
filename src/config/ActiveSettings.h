@@ -133,6 +133,12 @@ public:
 	[[nodiscard]] static bool ExperimentalSamplerCacheFastPath();
 	[[nodiscard]] static bool ExperimentalExtendedCommitThreshold();
 
+	// Experimental MetalFX spatial upscaling (Metal/iOS). Read once by MetalRenderer at construction
+	// and latched; see CemuConfig experimental_metalfx_* flags.
+	[[nodiscard]] static bool   ExperimentalMetalFXEnable();
+	[[nodiscard]] static sint32 ExperimentalMetalFXRenderScale();
+	[[nodiscard]] static sint32 ExperimentalMetalFXColorProcessing();
+
 private:
 	inline static bool s_setPathsCalled = false;
 	// dump options

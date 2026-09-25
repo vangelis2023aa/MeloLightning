@@ -549,6 +549,17 @@ struct CemuConfig
 	// capacity (IAudioAPI::kBlockCount) at use; the ring is already allocated for that many blocks.
 	ConfigValue<sint32> experimental_audio_buffer_blocks{ 0 };
 
+	// Experimental MetalFX spatial upscaling (iOS, Metal only, requires iOS 16+ and a supported
+	// device). All default so the renderer behaves EXACTLY as without these options:
+	//  - enable == false      => present path unchanged, no MetalFX resources allocated.
+	//  - render_scale         => internal render-target resolution percentage (100 = native = no
+	//                            reduction and no upscale; lower values render cheaper then MetalFX
+	//                            upscales to native). Only consulted when enable is true.
+	//  - color_processing     => MTLFXSpatialScalerColorProcessingMode (0 Perceptual / 1 Linear / 2 HDR).
+	ConfigValue<bool>   experimental_metalfx_enable{ false };
+	ConfigValue<sint32> experimental_metalfx_render_scale{ 67 };
+	ConfigValue<sint32> experimental_metalfx_color_processing{ 0 };
+
 	XMLConfigParser Load(XMLConfigParser& parser);
 	XMLConfigParser Save(XMLConfigParser& parser);
 

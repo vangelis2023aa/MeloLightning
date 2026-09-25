@@ -345,6 +345,49 @@ struct SettingsView: View {
                     Text("With all of these off, the emulator behaves the same as it does normally.")
                 }
 
+                if configManager.renderer.wrappedValue == .metal {
+                    Section {
+                        Text("Experimental. MetalFX renders the game at a lower internal resolution and upscales the final image with Apple's spatial scaler, which can lower GPU load and heat. It can also introduce upscaling artifacts, softer or shimmering image quality, and frame-pacing changes, and may behave differently per game. Requires iOS 16 or newer on a MetalFX-capable device; on unsupported devices it stays off automatically. All options are off by default and apply after relaunching the game.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Toggle("Enable MetalFX Upscaling", isOn: configManager.experimentalMetalFXEnable)
+                            Text("Master switch. When off, the renderer behaves exactly as normal — native resolution, no scaler, no extra GPU resources. When on, the game renders at the resolution below and MetalFX upscales it to your display.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Picker("Internal Resolution", selection: configManager.experimentalMetalFXRenderScale) {
+                                Text("50% (Performance)").tag(50)
+                                Text("67% (Balanced)").tag(67)
+                                Text("75%").tag(75)
+                                Text("85% (Quality)").tag(85)
+                                Text("100% (Native — no upscale)").tag(100)
+                            }
+                            Text("How much to lower the render resolution before upscaling. Lower percentages do less GPU work but look softer; 100% renders at native resolution and skips upscaling entirely. Only used while MetalFX is enabled.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Picker("Color Processing", selection: configManager.experimentalMetalFXColorProcessing) {
+                                Text("Perceptual (Default)").tag(0)
+                                Text("Linear").tag(1)
+                                Text("HDR").tag(2)
+                            }
+                            Text("How MetalFX interprets the color data it upscales. Perceptual matches standard (sRGB) output and is the safe default; change this only if the upscaled image looks too dark, washed out, or clipped.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    } header: {
+                        Text("Experimental Graphics")
+                    } footer: {
+                        Text("MetalFX is Metal-only. With it off, rendering is identical to normal. If your device does not support MetalFX, the emulator falls back to normal rendering without crashing.")
+                    }
+                }
+
                 Section("Audio") {
                     Toggle("TV Audio", isOn: configManager.tvAudioEnabled)
                     Toggle("Pad Audio", isOn: configManager.padAudioEnabled)
