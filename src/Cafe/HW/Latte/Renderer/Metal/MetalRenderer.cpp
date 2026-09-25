@@ -2234,6 +2234,15 @@ MTL::CommandBuffer* MetalRenderer::GetCommandBuffer()
 
         m_recordedDrawcalls = 0;
         m_commitTreshold = m_defaultCommitTreshlod;
+        // Experimental extended command-buffer batching (experimental_extended_commit_threshold): when
+        // ON, raise the opportunistic commit cadence (2x) so more draws batch into one command buffer
+        // before an opportunistic commit. Only the default cadence is scaled — RequestSoonCommit()
+        // still forces a prompt commit for readback / occlusion-query ordering (it overrides
+        // m_commitTreshold directly to m_recordedDrawcalls+8), and explicit commits (present/flush)
+        // call CommitCommandBuffer() unconditionally. Output is byte-identical; only submission cadence
+        // changes. When OFF this is one atomic bool read per command-buffer creation.
+        if (ActiveSettings::ExperimentalExtendedCommitThreshold())
+            m_commitTreshold = m_defaultCommitTreshlod * 2;
 
         // Debug
         m_performanceMonitor.m_commandBuffers++;
