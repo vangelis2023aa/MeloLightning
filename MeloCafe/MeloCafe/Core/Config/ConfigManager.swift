@@ -101,6 +101,36 @@ class ConfigManager: ObservableObject {
         }
     }
 
+    // Experimental performance (all default OFF; see the "Experimental Performance" settings
+    // section). Each toggle gates exactly one optimization path; with every toggle OFF the
+    // emulator behaves the same as before these options existed.
+    var experimentalAggressiveGpuWait: Binding<Bool> {
+        Binding {
+            self.config.experimentalAggressiveGpuWait
+        } set: {
+            self.config.experimentalAggressiveGpuWait = $0
+            self.objectWillChange.send()
+        }
+    }
+
+    var experimentalAggressiveFramePacing: Binding<Bool> {
+        Binding {
+            self.config.experimentalAggressiveFramePacing
+        } set: {
+            self.config.experimentalAggressiveFramePacing = $0
+            self.objectWillChange.send()
+        }
+    }
+
+    var experimentalSkipRedundantResidency: Binding<Bool> {
+        Binding {
+            self.config.experimentalSkipRedundantResidency
+        } set: {
+            self.config.experimentalSkipRedundantResidency = $0
+            self.objectWillChange.send()
+        }
+    }
+
     var renderUpsideDown: Binding<Bool> {
         Binding {
             self.config.renderUpsideDown

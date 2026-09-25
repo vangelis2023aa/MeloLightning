@@ -121,6 +121,11 @@ typedef NS_ENUM(NSInteger, ObjCPrecompiledShaderOption) {
 @property (nonatomic) float textureResolutionScale;
 @property (nonatomic) BOOL disableStreamout;
 
+// experimental performance (all default OFF; see "Experimental Performance" settings section)
+@property (nonatomic) BOOL experimentalAggressiveGpuWait;
+@property (nonatomic) BOOL experimentalAggressiveFramePacing;
+@property (nonatomic) BOOL experimentalSkipRedundantResidency;
+
 @property (nonatomic) BOOL overrideAppGammaPreference;
 @property (nonatomic) float overrideGammaValue;
 @property (nonatomic) float userDisplayGamma;

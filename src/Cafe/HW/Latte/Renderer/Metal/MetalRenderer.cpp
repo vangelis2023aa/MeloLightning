@@ -22,6 +22,7 @@
 #include "Cafe/HW/Latte/Core/FetchShader.h"
 #include "Cafe/HW/Latte/Core/LatteConst.h"
 #include "config/CemuConfig.h"
+#include "config/ActiveSettings.h"
 #include "WindowSystem.h"
 
 #include <cstring>
@@ -2384,6 +2385,14 @@ void MetalRenderer::EndEncoding()
         m_commandEncoder = nullptr;
         m_encoderType = MetalEncoderType::None;
 
+        // The residency tracking for the "Skip Redundant GPU Residency" toggle is scoped to the
+        // encoder we are tearing down here. This is the single funnel every encoder transition
+        // passes through (m_commandEncoder is nulled only here, and every Get*CommandEncoder that
+        // creates a new encoder calls EndEncoding first), so clearing here guarantees no residency
+        // state from a previous encoder can ever be consulted against a different one. Harmless when
+        // the toggle is OFF (the map is always empty in that case).
+        m_residentResources.clear();
+
         // Commit the command buffer if enough draw calls have been recorded
         if (m_recordedDrawcalls >= m_commitTreshold)
             CommitCommandBuffer();
@@ -2560,6 +2569,46 @@ void MetalRenderer::PrepareUniformBufferSizes(LatteDecompilerShader* shader)
     }
 }
 
+void MetalRenderer::DeclareResidency(MTL::RenderCommandEncoder* enc, const MTL::Resource* resource, MTL::ResourceUsage usage, MTL::RenderStages stage)
+{
+    // OFF path (point (f)): behaviorally identical to the original call sites - a direct useResource
+    // with the same resource pointer, usage, and stage. m_residentResources stays empty and is never
+    // consulted, so with the toggle off this path matches the previous code exactly.
+    if (!ActiveSettings::ExperimentalSkipRedundantResidency())
+    {
+        enc->useResource(resource, usage, stage);
+        return;
+    }
+
+    // ON path. Pack usage and stage into disjoint 16-bit halves of a 32-bit key. Their raw bit ranges
+    // overlap (ResourceUsage: Read=1/Write=2/Sample=4; RenderStages: Vertex=1/Fragment=2/Tile=4/
+    // Object=8/Mesh=16), so a naive usage|stage would alias; keeping them in separate halves makes the
+    // mask unambiguous (point (b)). If either enum ever carries a value we cannot represent in 16 bits,
+    // fall back to an unconditional useResource rather than risk truncating the mask and skipping a
+    // declaration we should not (fail-safe for points (b)/(d)).
+    const uint32 usageBits = (uint32)usage;
+    const uint32 stageBits = (uint32)stage;
+    if (usageBits > 0xFFFF || stageBits > 0xFFFF)
+    {
+        enc->useResource(resource, usage, stage);
+        return;
+    }
+    const uint32 need = usageBits | (stageBits << 16);
+
+    // Key on the exact pointer that is handed to useResource just below, so the tracked identity can
+    // never diverge from the object Metal is told about (point (a)).
+    uint32& have = m_residentResources[(const void*)resource];
+    if ((have & need) == need)
+        return; // already resident on this encoder with a fully covering usage+stage mask -> safe to skip
+
+    // Not fully covered. Because we only skip when the recorded mask already covers every requested
+    // bit, we can never under-declare (point (d)): any new usage or stage bit forces a real useResource.
+    // The map is cleared in EndEncoding(), so `have` only ever reflects the current encoder (points
+    // (c)/(e)).
+    have |= need;
+    enc->useResource(resource, usage, stage);
+}
+
 bool MetalRenderer::BindStageResources(MTL::RenderCommandEncoder* renderCommandEncoder, LatteDecompilerShader* shader, bool usesGeometryShader)
 {
     auto mtlShaderType = GetMtlShaderType(shader->shaderType, usesGeometryShader);
@@ -2704,7 +2753,7 @@ bool MetalRenderer::BindStageResources(MTL::RenderCommandEncoder* renderCommandE
         if (argumentEncoder)
         {
             argumentBindings[MetalArgumentBuffer::TextureBase + relative_textureUnit] = {MetalArgumentBinding::Type::Texture, mtlTexture, 0};
-            renderCommandEncoder->useResource(mtlTexture, MTL::ResourceUsageRead | MTL::ResourceUsageSample, renderStage);
+            DeclareResidency(renderCommandEncoder, mtlTexture, MTL::ResourceUsageRead | MTL::ResourceUsageSample, renderStage);
         }
         else
             SetTexture(renderCommandEncoder, mtlShaderType, mtlTexture, binding);
@@ -2807,7 +2856,7 @@ bool MetalRenderer::BindStageResources(MTL::RenderCommandEncoder* renderCommandE
         if (argumentEncoder)
         {
             argumentBindings[MetalArgumentBuffer::SupportBuffer] = {MetalArgumentBinding::Type::Buffer, allocation->mtlBuffer, allocation->bufferOffset};
-            renderCommandEncoder->useResource(allocation->mtlBuffer, MTL::ResourceUsageRead, renderStage);
+            DeclareResidency(renderCommandEncoder, allocation->mtlBuffer, MTL::ResourceUsageRead, renderStage);
         }
         else
             SetBuffer(renderCommandEncoder, mtlShaderType, allocation->mtlBuffer, allocation->bufferOffset, shader->resourceMapping.uniformVarsBufferBindingPoint);
@@ -2844,7 +2893,7 @@ bool MetalRenderer::BindStageResources(MTL::RenderCommandEncoder* renderCommandE
             if (argumentEncoder)
             {
                 argumentBindings[MetalArgumentBuffer::UniformBufferBase + i] = {MetalArgumentBinding::Type::Buffer, buffer, offset};
-                renderCommandEncoder->useResource(buffer, MTL::ResourceUsageRead, renderStage);
+                DeclareResidency(renderCommandEncoder, buffer, MTL::ResourceUsageRead, renderStage);
             }
             else
                 SetBuffer(renderCommandEncoder, mtlShaderType, buffer, offset, binding);
@@ -2858,7 +2907,7 @@ bool MetalRenderer::BindStageResources(MTL::RenderCommandEncoder* renderCommandE
         if (argumentEncoder)
         {
             argumentBindings[MetalArgumentBuffer::StreamoutBuffer] = {MetalArgumentBinding::Type::Buffer, xfbRingBuffer, 0};
-            renderCommandEncoder->useResource(xfbRingBuffer, MTL::ResourceUsageWrite, renderStage);
+            DeclareResidency(renderCommandEncoder, xfbRingBuffer, MTL::ResourceUsageWrite, renderStage);
         }
         else
             SetBuffer(renderCommandEncoder, mtlShaderType, xfbRingBuffer, 0, shader->resourceMapping.tfStorageBindingPoint);
@@ -2890,7 +2939,7 @@ bool MetalRenderer::BindStageResources(MTL::RenderCommandEncoder* renderCommandE
                     vertexBufferSize = 0;
                 }
                 argumentBindings[MetalArgumentBuffer::VertexBufferBase + bufferIndex] = {MetalArgumentBinding::Type::Buffer, vertexBuffer, vertexBufferOffset};
-                renderCommandEncoder->useResource(vertexBuffer, MTL::ResourceUsageRead, renderStage);
+                DeclareResidency(renderCommandEncoder, vertexBuffer, MTL::ResourceUsageRead, renderStage);
                 vertexBufferSize = std::min<size_t>(vertexBufferSize, vertexBuffer->length() - vertexBufferOffset);
                 argumentBindings[MetalArgumentBuffer::VertexBufferSizeBase + bufferIndex] = {MetalArgumentBinding::Type::Constant, nullptr,
                     static_cast<uint32>(std::min<size_t>(vertexBufferSize, std::numeric_limits<uint32>::max()))};
@@ -2911,7 +2960,7 @@ bool MetalRenderer::BindStageResources(MTL::RenderCommandEncoder* renderCommandE
                 indexBufferSize = 0;
             }
             argumentBindings[MetalArgumentBuffer::IndexBuffer] = {MetalArgumentBinding::Type::Buffer, indexBuffer, indexBufferOffset};
-            renderCommandEncoder->useResource(indexBuffer, MTL::ResourceUsageRead, renderStage);
+            DeclareResidency(renderCommandEncoder, indexBuffer, MTL::ResourceUsageRead, renderStage);
             indexBufferSize = std::min<size_t>(indexBufferSize, indexBuffer->length() - indexBufferOffset);
             argumentBindings[MetalArgumentBuffer::IndexBufferSize] = {MetalArgumentBinding::Type::Constant, nullptr,
                 static_cast<uint32>(std::min<size_t>(indexBufferSize, std::numeric_limits<uint32>::max()))};
@@ -2921,8 +2970,12 @@ bool MetalRenderer::BindStageResources(MTL::RenderCommandEncoder* renderCommandE
     
     if (argumentEncoder)
     {
-        // Residency declarations above are needed for every encoder, including
-        // when the immutable argument-buffer contents can be reused.
+        // Residency declarations above are needed for every encoder, including when the immutable
+        // argument-buffer contents can be reused (the arg buffer is deduped by GetCachedArgumentBuffer,
+        // but each referenced resource must still be made resident on whichever encoder will draw).
+        // The "Skip Redundant GPU Residency" experimental toggle only removes the *repeat*
+        // declarations of an already-resident resource on the same encoder (via DeclareResidency); the
+        // first declaration on each encoder still happens, so this path is unchanged when the toggle is OFF.
         auto* allocation = m_memoryManager->GetCachedArgumentBuffer(mtlShaderType, argumentEncoder, argumentBindings);
         SetBuffer(renderCommandEncoder, mtlShaderType, allocation->mtlBuffer, allocation->bufferOffset, shader->resourceMapping.argumentBufferBindingPoint);
     }

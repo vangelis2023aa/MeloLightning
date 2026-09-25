@@ -532,6 +532,14 @@ struct CemuConfig
 	ConfigValue<bool> framebuffer_fetch{ true };
 #endif
 
+	// experimental performance (all default OFF; surfaced in the app's "Experimental Performance"
+	// settings section). Each flag gates exactly one optimization path; with all OFF the emulator
+	// behaves identically to a build without these options. Backed by std::atomic<bool>, so hot
+	// paths can read them lock-free (Swift main-thread writes / GPU-thread reads are safe).
+	ConfigValue<bool> experimental_aggressive_gpu_wait{ false };     // aggressive backoff for WAIT_REG_MEM + MEM semaphore stalls
+	ConfigValue<bool> experimental_aggressive_frame_pacing{ false }; // aggressive backoff for flip-wait + ring-space waits
+	ConfigValue<bool> experimental_skip_redundant_residency{ false };// Metal: skip redundant per-encoder useResource() residency
+
 	XMLConfigParser Load(XMLConfigParser& parser);
 	XMLConfigParser Save(XMLConfigParser& parser);
 

@@ -112,6 +112,21 @@ bool ActiveSettings::WaitForGX2DrawDoneEnabled()
 	return GetConfig().gx2drawdone_sync;
 }
 
+bool ActiveSettings::ExperimentalAggressiveGpuWait()
+{
+	return GetConfig().experimental_aggressive_gpu_wait;
+}
+
+bool ActiveSettings::ExperimentalAggressiveFramePacing()
+{
+	return GetConfig().experimental_aggressive_frame_pacing;
+}
+
+bool ActiveSettings::ExperimentalSkipRedundantResidency()
+{
+	return GetConfig().experimental_skip_redundant_residency;
+}
+
 GraphicAPI ActiveSettings::GetGraphicsAPI()
 {
 	const GraphicAPI api = g_current_game_profile->GetGraphicsAPI().value_or(GetConfig().graphic_api);

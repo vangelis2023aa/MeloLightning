@@ -4,6 +4,7 @@
 #include "Cafe/OS/libs/gx2/GX2_Event.h" // for notification callbacks
 #include "Cafe/HW/Latte/Renderer/Renderer.h"
 #include "Cafe/HW/Latte/Core/Latte.h"
+#include "config/ActiveSettings.h"
 #include "Cafe/HW/Latte/Core/LatteDraw.h"
 #include "Cafe/HW/Latte/Core/LatteShader.h"
 #include "Cafe/HW/Latte/Core/LatteAsyncCommands.h"
@@ -480,12 +481,22 @@ LatteCMDPtr LatteCP_itWaitRegMem(LatteCMDPtr cmd, uint32 nWords)
 	{
 		// wait for memory address
 		// Bounded backoff for the fence wait (see the detailed comment inside the loop).
-		// Constants mirror the already on-device-validated ring-idle backoff in
-		// LatteCP_readU32Deprc so the behavior is the same proven pattern.
-		static constexpr uint32 kWaitRegMemSpinIterations  = 64;   // short pause-spin for immediate fence pickup
-		static constexpr uint32 kWaitRegMemYieldIterations = 32;   // yield window before sleeping
-		static constexpr uint32 kWaitRegMemBackoffStepUs   = 100;  // additional sleep granted per further waiting iteration
-		static constexpr uint32 kWaitRegMemBackoffMaxUs    = 500;  // hard cap (further clamped to the next vsync deadline)
+		// Default (toggle OFF) constants mirror the already on-device-validated ring-idle
+		// backoff in LatteCP_readU32Deprc, so with the toggle OFF this wait behaves the same as
+		// it did before the toggle existed: identical spin/yield/sleep schedule, identical vsync
+		// clamp, identical in-loop servicing and exit condition.
+		//
+		// The "Aggressive GPU Wait Backoff" experimental toggle (ExperimentalAggressiveGpuWait,
+		// read once here at wait entry - one atomic load per wait, not per iteration) shortens
+		// the spin/yield window and lets the thread sleep sooner and a little longer, so a
+		// GPU-bound stall drops the host core to idle faster (less heat). Only the backoff
+		// schedule changes; every in-loop action below is preserved. The aggressive values are
+		// experimental starting points for on-device tuning, not proven-optimal settings.
+		const bool aggressive = ActiveSettings::ExperimentalAggressiveGpuWait();
+		const uint32 kWaitRegMemSpinIterations  = aggressive ?  16 :  64; // short pause-spin for immediate fence pickup
+		const uint32 kWaitRegMemYieldIterations = aggressive ?   8 :  32; // yield window before sleeping
+		const uint32 kWaitRegMemBackoffStepUs   = aggressive ? 200 : 100; // additional sleep granted per further waiting iteration
+		const uint32 kWaitRegMemBackoffMaxUs    = aggressive ?1000 : 500; // hard cap (further clamped to the next vsync deadline)
 		uint32 waitIterations = 0;
 		performanceMonitor.gpuTime_fenceTime.beginMeasuring();
 		while (true)
@@ -697,10 +708,18 @@ LatteCMDPtr LatteCP_itMemSemaphore(LatteCMDPtr cmd, uint32 nWords)
 		// only observable effect is a bounded (<=kMemSemaphoreBackoffMaxUs) latency on the tail of
 		// long waits. Not vsync-clamped: this is GPU-queue synchronization, not on the pacing path,
 		// so the small cap alone bounds latency.
-		static constexpr uint32 kMemSemaphoreSpinIterations  = 2000; // tight-spin window for low-latency pickup (matches original)
-		static constexpr uint32 kMemSemaphoreYieldIterations = 2000; // yield-only window before we begin sleeping
-		static constexpr uint32 kMemSemaphoreBackoffStepUs   = 50;   // additional sleep granted per further idle iteration
-		static constexpr uint32 kMemSemaphoreBackoffMaxUs    = 250;  // hard cap so the signal is never materially delayed
+		//
+		// The "Aggressive GPU Wait Backoff" experimental toggle (ExperimentalAggressiveGpuWait,
+		// read once here at wait entry, not per iteration) shrinks the spin/yield window and
+		// sleeps sooner and a little longer while the semaphore is still zero. With the toggle
+		// OFF these constants equal the original values, so the wait behaves the same as it did
+		// before the toggle existed. The aggressive values are experimental starting points for
+		// on-device tuning, not proven-optimal settings.
+		const bool aggressive = ActiveSettings::ExperimentalAggressiveGpuWait();
+		const uint32 kMemSemaphoreSpinIterations  = aggressive ? 256 : 2000; // tight-spin window for low-latency pickup
+		const uint32 kMemSemaphoreYieldIterations = aggressive ?  64 : 2000; // yield-only window before we begin sleeping
+		const uint32 kMemSemaphoreBackoffStepUs   = aggressive ? 100 :   50; // additional sleep granted per further idle iteration
+		const uint32 kMemSemaphoreBackoffMaxUs    = aggressive ? 500 :  250; // hard cap so the signal is never materially delayed
 		LatteCP_signalEnterWait();
 		uint64 waitIterations = 0;
 		while (true)
@@ -1042,6 +1061,15 @@ LatteCMDPtr LatteCP_itHLEWaitForFlip(LatteCMDPtr cmd, uint32 nWords)
 	MPTR reserved1 = LatteReadCMD(); // reserved
 	// wait for flip
 	uint32 currentFlipCount = LatteGPUState.flipCounter;
+	// "Aggressive Frame-Pacing Backoff" experimental toggle (ExperimentalAggressiveFramePacing),
+	// read once here at loop entry (not per iteration). With the toggle OFF the flip spin-margin is
+	// the original 1000us, so frame pacing behaves the same as before the toggle existed. With it ON
+	// the margin shrinks so the thread sleeps through more of the frame interval and only spins for
+	// the final fraction before the (unchanged) vsync deadline - the single biggest idle-core saver,
+	// but the most timing-sensitive of the toggles. The aggressive value is an experimental starting
+	// point for on-device tuning, not a proven-optimal setting.
+	const bool aggressiveFramePacing = ActiveSettings::ExperimentalAggressiveFramePacing();
+	const uint64 kFlipSpinMarginUs = aggressiveFramePacing ? 250 : 1000;
 	while (true)
 	{
 		if (currentFlipCount != LatteGPUState.flipCounter)
@@ -1063,8 +1091,8 @@ LatteCMDPtr LatteCP_itHLEWaitForFlip(LatteCMDPtr cmd, uint32 nWords)
 		{
 			uint64 remainingUs = HighResolutionTimer::ticksToMicroseconds(deadline - nowTick);
 			// keep a margin for the final spin so host-sleep overshoot cannot push
-			// us past the deadline and disturb pacing
-			constexpr uint64 kFlipSpinMarginUs = 1000;
+			// us past the deadline and disturb pacing (kFlipSpinMarginUs is selected once
+			// at loop entry from the frame-pacing toggle)
 			if (remainingUs > kFlipSpinMarginUs)
 				std::this_thread::sleep_for(std::chrono::microseconds(remainingUs - kFlipSpinMarginUs));
 		}

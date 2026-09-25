@@ -281,7 +281,40 @@ struct SettingsView: View {
                         GraphicPacksView()
                     }
                 }
-                
+
+                Section {
+                    Text("These options may improve performance or thermals but are experimental and can cause graphical glitches, timing problems, crashes, or game-compatibility issues. All are off by default. Turn them on one at a time so you can tell which actually helps on your device.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Toggle("Aggressive GPU Wait Backoff", isOn: configManager.experimentalAggressiveGpuWait)
+                        Text("When the CPU is stalled waiting on the GPU (fence and semaphore waits), let the waiting thread sleep sooner instead of busy-spinning a core. May reduce heat while GPU-bound; can add a little CPU–GPU latency in heavily GPU-bound scenes.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Toggle("Aggressive Frame-Pacing Backoff", isOn: configManager.experimentalAggressiveFramePacing)
+                        Text("Spend less time busy-waiting for the next display flip and for command-buffer space, sleeping through most of the idle interval instead. This is the biggest idle-core saver but also the most timing-sensitive: too aggressive can cause micro-stutter.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if configManager.renderer.wrappedValue == .metal {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Toggle("Skip Redundant GPU Residency", isOn: configManager.experimentalSkipRedundantResidency)
+                            Text("Metal only. Avoid re-declaring the same textures and buffers as resident on every draw within a render pass. Cuts per-draw driver work; if it misbehaves it can cause rendering artifacts.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                } header: {
+                    Text("Experimental Performance")
+                } footer: {
+                    Text("With all of these off, the emulator behaves the same as it does normally.")
+                }
+
                 Section("Audio") {
                     Toggle("TV Audio", isOn: configManager.tvAudioEnabled)
                     Toggle("Pad Audio", isOn: configManager.padAudioEnabled)

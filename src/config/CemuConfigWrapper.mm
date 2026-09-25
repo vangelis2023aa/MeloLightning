@@ -150,6 +150,15 @@ static CPUMode toCPUMode(ObjCCPUMode mode) {
 - (BOOL)gx2DrawDoneSync                    { return GetConfig().gx2drawdone_sync.GetValue(); }
 - (void)setGx2DrawDoneSync:(BOOL)v         { GetConfig().gx2drawdone_sync = v; autoSave(); }
 
+- (BOOL)experimentalAggressiveGpuWait      { return GetConfig().experimental_aggressive_gpu_wait.GetValue(); }
+- (void)setExperimentalAggressiveGpuWait:(BOOL)v { GetConfig().experimental_aggressive_gpu_wait = v; autoSave(); }
+
+- (BOOL)experimentalAggressiveFramePacing  { return GetConfig().experimental_aggressive_frame_pacing.GetValue(); }
+- (void)setExperimentalAggressiveFramePacing:(BOOL)v { GetConfig().experimental_aggressive_frame_pacing = v; autoSave(); }
+
+- (BOOL)experimentalSkipRedundantResidency { return GetConfig().experimental_skip_redundant_residency.GetValue(); }
+- (void)setExperimentalSkipRedundantResidency:(BOOL)v { GetConfig().experimental_skip_redundant_residency = v; autoSave(); }
+
 - (BOOL)renderUpsideDown                   { return GetConfig().render_upside_down.GetValue(); }
 - (void)setRenderUpsideDown:(BOOL)v        { GetConfig().render_upside_down = v; autoSave(); }
 

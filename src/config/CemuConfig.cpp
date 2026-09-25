@@ -289,6 +289,12 @@ XMLConfigParser CemuConfig::Load(XMLConfigParser& parser)
 	framebuffer_fetch = debug.get("FramebufferFetch", true);
 #endif
 
+	// experimental performance (all default OFF)
+	auto experimental = parser.get("Experimental");
+	experimental_aggressive_gpu_wait = experimental.get("AggressiveGpuWait", false);
+	experimental_aggressive_frame_pacing = experimental.get("AggressiveFramePacing", false);
+	experimental_skip_redundant_residency = experimental.get("SkipRedundantResidency", false);
+
 	// input
 	auto input = parser.get("Input");
 	disable_motion = input.get("DisableMotion", false);
@@ -461,6 +467,12 @@ XMLConfigParser CemuConfig::Save(XMLConfigParser& parser)
 	debug.set("GPUCaptureDir", gpu_capture_dir);
 	debug.set("FramebufferFetch", framebuffer_fetch);
 #endif
+
+	// experimental performance (all default OFF)
+	auto experimental = config.set("Experimental");
+	experimental.set("AggressiveGpuWait", experimental_aggressive_gpu_wait.GetValue());
+	experimental.set("AggressiveFramePacing", experimental_aggressive_frame_pacing.GetValue());
+	experimental.set("SkipRedundantResidency", experimental_skip_redundant_residency.GetValue());
 
 	// input
 	auto input = config.set("Input");

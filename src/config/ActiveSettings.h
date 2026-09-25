@@ -123,6 +123,12 @@ public:
 	[[nodiscard]] static bool FlushGPUCacheOnSwap();
 	[[nodiscard]] static bool ForceSamplerRoundToPrecision();
 
+	// experimental performance (all default OFF; see CemuConfig experimental_* flags).
+	// Cheap lock-free atomic reads; safe to call from GPU/CP threads.
+	[[nodiscard]] static bool ExperimentalAggressiveGpuWait();
+	[[nodiscard]] static bool ExperimentalAggressiveFramePacing();
+	[[nodiscard]] static bool ExperimentalSkipRedundantResidency();
+
 private:
 	inline static bool s_setPathsCalled = false;
 	// dump options

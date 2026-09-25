@@ -1,5 +1,6 @@
 #include "Cafe/OS/common/OSCommon.h"
 #include "Cafe/OS/libs/TCL/TCL.h"
+#include "config/ActiveSettings.h"
 
 #include "HW/Latte/Core/LattePM4.h"
 
@@ -80,25 +81,31 @@ namespace TCL
 		return true;
 	}
 
-	// Backoff for the ring-buffer space wait below. This wait is pure CPU-ahead-of-GPU
-	// backpressure: the producer (CPU/GX2) has filled the ring and must wait for the GPU
-	// consumer to advance the read index before more commands can be written. On ARM/iOS
-	// _mm_pause() is only a "yield" hint and does not idle the core, so the original pure
-	// spin burned a full core for the entire stall. We keep a very short pause-spin so the
-	// common case (the GPU frees a slot within microseconds) stays low-latency, then yield
-	// briefly, then ramp to short, bounded sleeps so a longer stall stops spinning a core.
-	// The cap is kept small so a command whose space frees up mid-sleep is never materially
-	// delayed. Unlike the GPU-idle wait, this is not clamped to a vsync deadline because it
-	// is not on the vsync/pacing path - the small cap alone bounds any added latency.
-	static constexpr uint32 kTCLRBSpaceSpinIterations  = 64;  // pause-spin iterations for microsecond-latency pickup
-	static constexpr uint32 kTCLRBSpaceYieldIterations = 32;  // yield-only iterations before we begin sleeping
-	static constexpr uint32 kTCLRBSpaceBackoffStepUs   = 50;  // additional sleep granted per further waiting iteration
-	static constexpr uint32 kTCLRBSpaceBackoffMaxUs    = 250; // hard cap so a submission is never materially delayed
-
 	void TCLWaitForRBSpace(uint32be numU32s)
 	{
 		uint32 writeIndex = tclRingBufferA_writeIndex.load(std::memory_order::relaxed);
 		uint32 waitIterations = 0;
+		// Backoff for the ring-buffer space wait below. This wait is pure CPU-ahead-of-GPU
+		// backpressure: the producer (CPU/GX2) has filled the ring and must wait for the GPU
+		// consumer to advance the read index before more commands can be written. On ARM/iOS
+		// _mm_pause() is only a "yield" hint and does not idle the core, so the original pure
+		// spin burned a full core for the entire stall. We keep a very short pause-spin so the
+		// common case (the GPU frees a slot within microseconds) stays low-latency, then yield
+		// briefly, then ramp to short, bounded sleeps so a longer stall stops spinning a core.
+		// The cap is kept small so a command whose space frees up mid-sleep is never materially
+		// delayed. Unlike the GPU-idle wait, this is not clamped to a vsync deadline because it
+		// is not on the vsync/pacing path - the small cap alone bounds any added latency.
+		//
+		// The "Aggressive Frame-Pacing Backoff" experimental toggle (ExperimentalAggressiveFramePacing,
+		// read once here at wait entry, not per iteration) shortens the spin/yield window and sleeps
+		// sooner and a little longer. With the toggle OFF these constants equal the original values, so
+		// this wait behaves the same as it did before the toggle existed. The aggressive values are
+		// experimental starting points for on-device tuning, not proven-optimal settings.
+		const bool aggressive = ActiveSettings::ExperimentalAggressiveFramePacing();
+		const uint32 kTCLRBSpaceSpinIterations  = aggressive ?  16 :  64; // pause-spin iterations for microsecond-latency pickup
+		const uint32 kTCLRBSpaceYieldIterations = aggressive ?   8 :  32; // yield-only iterations before we begin sleeping
+		const uint32 kTCLRBSpaceBackoffStepUs   = aggressive ? 100 :  50; // additional sleep granted per further waiting iteration
+		const uint32 kTCLRBSpaceBackoffMaxUs    = aggressive ? 500 : 250; // hard cap so a submission is never materially delayed
 		while (true)
 		{
 			uint32 readIndex = tclRingBufferA_readIndex.load(std::memory_order::acquire);

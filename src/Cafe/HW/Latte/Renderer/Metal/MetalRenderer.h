@@ -382,6 +382,14 @@ public:
 	bool CheckIfRenderPassNeedsFlush(LatteDecompilerShader* shader);
 	bool BindStageResources(MTL::RenderCommandEncoder* renderCommandEncoder, LatteDecompilerShader* shader, bool usesGeometryShader);
 
+	// Declares a resource resident on the given render command encoder. With the "Skip Redundant GPU
+	// Residency" experimental toggle OFF this is exactly enc->useResource(resource, usage, stage) - no
+	// behavioral change. With it ON, the call is skipped only when this exact resource pointer has
+	// already been declared on the current encoder with a usage+stage mask that FULLY covers the
+	// request (so it can never under-declare); otherwise the request is recorded and useResource is
+	// called. See m_residentResources.
+	void DeclareResidency(MTL::RenderCommandEncoder* enc, const MTL::Resource* resource, MTL::ResourceUsage usage, MTL::RenderStages stage);
+
     void ClearColorTextureInternal(MTL::Texture* mtlTexture, sint32 sliceIndex, sint32 mipIndex, float r, float g, float b, float a);
 
     void CopyBufferToBuffer(MTL::Buffer* src, uint32 srcOffset, MTL::Buffer* dst, uint32 dstOffset, uint32 size, MTL::RenderStages after, MTL::RenderStages before);
@@ -576,6 +584,16 @@ private:
 	std::vector<MTL::CommandBuffer*> m_executingCommandBuffers;
 	MetalEncoderType m_encoderType = MetalEncoderType::None;
 	MTL::CommandEncoder* m_commandEncoder = nullptr;
+
+	// Residency tracking for the "Skip Redundant GPU Residency" experimental toggle. Records which
+	// resources have already been declared resident (via useResource) on the CURRENT render command
+	// encoder, keyed by the exact MTL::Resource pointer passed to useResource; the value packs the
+	// declared ResourceUsage (low 16 bits) and RenderStages (high 16 bits) as disjoint bitfields so
+	// neither can be truncated or aliased against the other. Cleared in EndEncoding() - the single
+	// funnel every encoder transition passes through - so it only ever describes the live encoder and
+	// can never leak residency state into a different command encoder. Only consulted when the toggle
+	// is ON; when OFF it stays empty and useResource is always called directly.
+	std::unordered_map<const void*, uint32> m_residentResources;
 
     uint32 m_recordedDrawcalls;
     uint32 m_defaultCommitTreshlod;
