@@ -2666,6 +2666,10 @@ bool MetalRenderer::BindStageResources(MTL::RenderCommandEncoder* renderCommandE
             UNREACHABLE;
     }
     
+    // Experimental per-draw-pass sampler fast-path toggle (sampled once per stage; the only OFF-path
+    // cost is this atomic bool read). See MetalSamplerCache::GetPassSampler for the correctness proof.
+    const bool samplerFastPathOn = ActiveSettings::ExperimentalSamplerCacheFastPath();
+
     for (sint32 relative_textureUnit = 0; relative_textureUnit < LATTE_NUM_MAX_TEX_UNITS; relative_textureUnit++)
     {
         if (shader->resourceMapping.textureUnitToBindingPoint[relative_textureUnit] < 0)
@@ -2714,11 +2718,25 @@ bool MetalRenderer::BindStageResources(MTL::RenderCommandEncoder* renderCommandE
         uint32 stageSamplerIndex = shader->textureUnitSamplerAssignment[relative_textureUnit];
         if (samplerBinding >= 0 && stageSamplerIndex != LATTE_DECOMPILER_SAMPLER_NONE)
         {
-            uint32 samplerIndex = stageSamplerIndex + LatteDecompiler_getTextureSamplerBaseIndex(shader->shaderType);
-            _LatteRegisterSetSampler* samplerWords = LatteGPUState.contextNew.SQ_TEX_SAMPLER + samplerIndex;
-            if (textureView && textureView->baseTexture->overwriteInfo.anisotropicLevel >= 0)
-                samplerWords->WORD0.set_MAX_ANISO_RATIO(textureView->baseTexture->overwriteInfo.anisotropicLevel);
-            sampler = m_samplerCache->GetSamplerState(LatteGPUState.contextNew, shader->shaderType, stageSamplerIndex, samplerWords);
+            // Experimental fast path: the sampler resolved for this (stage, unit) is frozen for the whole
+            // draw pass, so reuse the pointer from a previous draw in the same pass and skip the aniso
+            // mutation, the sampler hash and the map probe. Any generation mismatch (or toggle OFF) falls
+            // through to the exact original resolve + re-cache below, so a wrong sampler can never bind.
+            MTL::SamplerState* cachedSampler = samplerFastPathOn ? m_samplerCache->GetPassSampler(shader->shaderType, relative_textureUnit, m_drawPassGeneration) : nullptr;
+            if (cachedSampler)
+            {
+                sampler = cachedSampler;
+            }
+            else
+            {
+                uint32 samplerIndex = stageSamplerIndex + LatteDecompiler_getTextureSamplerBaseIndex(shader->shaderType);
+                _LatteRegisterSetSampler* samplerWords = LatteGPUState.contextNew.SQ_TEX_SAMPLER + samplerIndex;
+                if (textureView && textureView->baseTexture->overwriteInfo.anisotropicLevel >= 0)
+                    samplerWords->WORD0.set_MAX_ANISO_RATIO(textureView->baseTexture->overwriteInfo.anisotropicLevel);
+                sampler = m_samplerCache->GetSamplerState(LatteGPUState.contextNew, shader->shaderType, stageSamplerIndex, samplerWords);
+                if (samplerFastPathOn)
+                    m_samplerCache->SetPassSampler(shader->shaderType, relative_textureUnit, m_drawPassGeneration, sampler);
+            }
         }
         if (samplerBinding >= 0)
         {
