@@ -131,6 +131,15 @@ class ConfigManager: ObservableObject {
         }
     }
 
+    var experimentalPpcBlockLinking: Binding<Bool> {
+        Binding {
+            self.config.experimentalPpcBlockLinking
+        } set: {
+            self.config.experimentalPpcBlockLinking = $0
+            self.objectWillChange.send()
+        }
+    }
+
     var renderUpsideDown: Binding<Bool> {
         Binding {
             self.config.renderUpsideDown

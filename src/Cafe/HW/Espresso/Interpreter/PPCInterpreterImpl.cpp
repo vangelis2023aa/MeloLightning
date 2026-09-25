@@ -8,6 +8,7 @@
 #include "PPCInterpreterHelper.h"
 #include "Cafe/HW/Espresso/Debugger/Debugger.h"
 #include "Cafe/HW/Espresso/Debugger/GDBStub.h"
+#include "config/ActiveSettings.h"
 
 class PPCItpCafeOSUsermode
 {
@@ -466,6 +467,7 @@ public:
     static constexpr uint32 TABLE_MAX_USED = TABLE_SIZE * 3 / 4;
     static constexpr uint32 MAX_BLOCK_LENGTH = 64;
     static constexpr size_t MAX_POOL_ENTRIES = 1024 * 1024;
+    static constexpr uint32 INVALID_SLOT = 0xFFFFFFFFu; // sentinel for the optional block-linking table
 
     PPCBlockCache()
     {
@@ -512,17 +514,31 @@ public:
     void clear(const char* reason)
     {
         std::fill(m_table.begin(), m_table.end(), PPCBlockRef{});
-        
+
+        // reset the optional block-linking table alongside the main table so a stale slot index can
+        // never be followed after a clear (only allocated when the experimental toggle is ON)
+        if (!m_nextSlot.empty())
+            std::fill(m_nextSlot.begin(), m_nextSlot.end(), INVALID_SLOT);
+
         m_entries.clear();
         m_used = 0;
         m_clears++;
-        
+
         if (m_clears <= 16 || (m_clears & 0xFF) == 0)
             cemuLog_log(LogType::Force, "PPC block cache: clear #{} ({}), {} blocks decoded since start", m_clears, reason, m_decodes);
     }
 
+    // Lazily allocate the block-linking table (1 MiB per thread). Called only while the experimental
+    // block-linking toggle is ON; stays empty (zero cost/memory) otherwise.
+    void ensureLinkTable()
+    {
+        if (m_nextSlot.empty())
+            m_nextSlot.assign(TABLE_SIZE, INVALID_SLOT);
+    }
+
     std::vector<PPCBlockRef> m_table;
     std::vector<PPCBlockEntry> m_entries;
+    std::vector<uint32> m_nextSlot; // predicted successor slot per block slot; empty unless linking is ON
     uint32 m_used = 0;
     uint32 m_generation = 0;
     uint64 m_decodes = 0;
@@ -1556,6 +1572,17 @@ public:
     static void executeTimesliceCached(PPCInterpreter_t* hCPU)
     {
         PPCBlockCache* cache = &PPCBlockCache_getForCurrentThread();
+
+        // Experimental: intra-thread block linking. Sampled once per timeslice, so the flag is a
+        // loop-invariant and the OFF path costs one well-predicted branch. When ON, each block records
+        // the table slot of its most recent successor so the next iteration can skip the hash+probe.
+        // The link is only a hint: it is re-validated with the exact condition lookup() uses
+        // (startAddr==ip && count!=0), so it can never return a wrong block, only a cheap mispredict.
+        const bool linkingOn = ActiveSettings::ExperimentalPpcBlockLinking();
+        if (linkingOn)
+            cache->ensureLinkTable();
+        uint32 prevSlot = PPCBlockCache::INVALID_SLOT;
+
         while (hCPU->remainingCycles > 0)
         {
             const uint32 gen = s_blockCacheGeneration.load(std::memory_order_acquire);
@@ -1563,12 +1590,36 @@ public:
             {
                 cache->clear("code invalidated");
                 cache->m_generation = gen;
+                prevSlot = PPCBlockCache::INVALID_SLOT; // links were reset; drop the stale predecessor
             }
 
             const uint32 ip = (uint32)hCPU->instructionPointer;
-            PPCBlockRef* block = cache->lookup(ip);
-            if (!block) [[unlikely]]
-                block = decodeBlock(hCPU, *cache, ip);
+
+            PPCBlockRef* block = nullptr;
+            if (linkingOn && prevSlot != PPCBlockCache::INVALID_SLOT)
+            {
+                const uint32 s = cache->m_nextSlot[prevSlot];
+                if (s != PPCBlockCache::INVALID_SLOT)
+                {
+                    PPCBlockRef& r = cache->m_table[s];
+                    if (r.count != 0 && r.startAddr == ip) // identical to lookup()'s hit condition
+                        block = &r;
+                }
+            }
+            if (!block)
+            {
+                block = cache->lookup(ip);
+                if (!block) [[unlikely]]
+                {
+                    const uint32 clearsBefore = cache->m_clears;
+                    block = decodeBlock(hCPU, *cache, ip);
+                    if (cache->m_clears != clearsBefore) // decode triggered a clear: predecessor is gone
+                        prevSlot = PPCBlockCache::INVALID_SLOT;
+                }
+                // (re)link predecessor -> this block (skipped on a link hit, already correct there)
+                if (linkingOn && prevSlot != PPCBlockCache::INVALID_SLOT)
+                    cache->m_nextSlot[prevSlot] = (uint32)(block - cache->m_table.data());
+            }
 
             const uint32 count = block->count;
             const PPCBlockTerm term = block->term;
@@ -1585,6 +1636,11 @@ public:
             if (hCPU->instructionPointer != ip + straight * 4)
                 assert_dbg();
 #endif
+
+            // remember this block as the predecessor for the next iteration's link. m_table is a
+            // fixed-size vector that is never reallocated (only cleared), so the slot index is stable.
+            if (linkingOn)
+                prevSlot = (uint32)(block - cache->m_table.data());
 
             switch (term)
             {
@@ -1605,6 +1661,11 @@ public:
             case PPCBlockTerm::Generic:
                 e->fn(hCPU, e->opcode);
                 cache = &PPCBlockCache_getForCurrentThread();
+                if (linkingOn)
+                {
+                    cache->ensureLinkTable();               // re-fetched cache may be a different thread's
+                    prevSlot = PPCBlockCache::INVALID_SLOT;  // and its slot indices are unrelated to prevSlot
+                }
                 break;
             }
         }

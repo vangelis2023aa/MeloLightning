@@ -128,6 +128,7 @@ public:
 	[[nodiscard]] static bool ExperimentalAggressiveGpuWait();
 	[[nodiscard]] static bool ExperimentalAggressiveFramePacing();
 	[[nodiscard]] static bool ExperimentalSkipRedundantResidency();
+	[[nodiscard]] static bool ExperimentalPpcBlockLinking();
 
 private:
 	inline static bool s_setPathsCalled = false;

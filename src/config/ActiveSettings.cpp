@@ -127,6 +127,11 @@ bool ActiveSettings::ExperimentalSkipRedundantResidency()
 	return GetConfig().experimental_skip_redundant_residency;
 }
 
+bool ActiveSettings::ExperimentalPpcBlockLinking()
+{
+	return GetConfig().experimental_ppc_block_linking;
+}
+
 GraphicAPI ActiveSettings::GetGraphicsAPI()
 {
 	const GraphicAPI api = g_current_game_profile->GetGraphicsAPI().value_or(GetConfig().graphic_api);

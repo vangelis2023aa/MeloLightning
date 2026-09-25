@@ -539,6 +539,7 @@ struct CemuConfig
 	ConfigValue<bool> experimental_aggressive_gpu_wait{ false };     // aggressive backoff for WAIT_REG_MEM + MEM semaphore stalls
 	ConfigValue<bool> experimental_aggressive_frame_pacing{ false }; // aggressive backoff for flip-wait + ring-space waits
 	ConfigValue<bool> experimental_skip_redundant_residency{ false };// Metal: skip redundant per-encoder useResource() residency
+	ConfigValue<bool> experimental_ppc_block_linking{ false };       // PPC interpreter: link basic blocks to skip per-block hash lookup
 
 	XMLConfigParser Load(XMLConfigParser& parser);
 	XMLConfigParser Save(XMLConfigParser& parser);

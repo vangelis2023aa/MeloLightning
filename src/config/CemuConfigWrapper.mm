@@ -159,6 +159,9 @@ static CPUMode toCPUMode(ObjCCPUMode mode) {
 - (BOOL)experimentalSkipRedundantResidency { return GetConfig().experimental_skip_redundant_residency.GetValue(); }
 - (void)setExperimentalSkipRedundantResidency:(BOOL)v { GetConfig().experimental_skip_redundant_residency = v; autoSave(); }
 
+- (BOOL)experimentalPpcBlockLinking        { return GetConfig().experimental_ppc_block_linking.GetValue(); }
+- (void)setExperimentalPpcBlockLinking:(BOOL)v { GetConfig().experimental_ppc_block_linking = v; autoSave(); }
+
 - (BOOL)renderUpsideDown                   { return GetConfig().render_upside_down.GetValue(); }
 - (void)setRenderUpsideDown:(BOOL)v        { GetConfig().render_upside_down = v; autoSave(); }
 

@@ -309,6 +309,13 @@ struct SettingsView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Toggle("PPC Block Linking", isOn: configManager.experimentalPpcBlockLinking)
+                        Text("Let the CPU interpreter jump straight from one block of guest code to the next instead of looking each one up in a hash table every time. Can reduce CPU load and heat; if it misbehaves it may cause instability or crashes. Self-clears whenever games modify their own code.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 } header: {
                     Text("Experimental Performance")
                 } footer: {

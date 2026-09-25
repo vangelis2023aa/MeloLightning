@@ -294,6 +294,7 @@ XMLConfigParser CemuConfig::Load(XMLConfigParser& parser)
 	experimental_aggressive_gpu_wait = experimental.get("AggressiveGpuWait", false);
 	experimental_aggressive_frame_pacing = experimental.get("AggressiveFramePacing", false);
 	experimental_skip_redundant_residency = experimental.get("SkipRedundantResidency", false);
+	experimental_ppc_block_linking = experimental.get("PpcBlockLinking", false);
 
 	// input
 	auto input = parser.get("Input");
@@ -473,6 +474,7 @@ XMLConfigParser CemuConfig::Save(XMLConfigParser& parser)
 	experimental.set("AggressiveGpuWait", experimental_aggressive_gpu_wait.GetValue());
 	experimental.set("AggressiveFramePacing", experimental_aggressive_frame_pacing.GetValue());
 	experimental.set("SkipRedundantResidency", experimental_skip_redundant_residency.GetValue());
+	experimental.set("PpcBlockLinking", experimental_ppc_block_linking.GetValue());
 
 	// input
 	auto input = config.set("Input");

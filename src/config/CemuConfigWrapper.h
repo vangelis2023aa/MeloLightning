@@ -125,6 +125,7 @@ typedef NS_ENUM(NSInteger, ObjCPrecompiledShaderOption) {
 @property (nonatomic) BOOL experimentalAggressiveGpuWait;
 @property (nonatomic) BOOL experimentalAggressiveFramePacing;
 @property (nonatomic) BOOL experimentalSkipRedundantResidency;
+@property (nonatomic) BOOL experimentalPpcBlockLinking;
 
 @property (nonatomic) BOOL overrideAppGammaPreference;
 @property (nonatomic) float overrideGammaValue;
