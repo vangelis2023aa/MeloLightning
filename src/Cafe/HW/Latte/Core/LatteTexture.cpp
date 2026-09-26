@@ -44,6 +44,27 @@ sint32 LatteTexture_getMetalFXRenderScalePercent()
 	return s_metalFXRenderScalePercent.load(std::memory_order_relaxed);
 }
 
+// Experimental MetalFX: scale-ratio inheritance hint. When a new texture is created over guest
+// memory that already backs a MetalFX-scaled texture (e.g. a VIEW_NOT_COMPATIBLE reinterpretation
+// or a CopySurface destination that is not itself a render target), it must adopt the SAME effective
+// rescale ratio, otherwise LatteTexture_doesEffectiveRescaleRatioMatch() fails and the texture-cache
+// copy paths silently skip the data sync -> stale/mis-interpreted bytes -> color corruption.
+// This holds the ratio-percent to apply to the very next LatteTexture_CreateTexture() call. It is set
+// and consumed synchronously on the GPU/Latte thread within a single creation call (like the
+// surrounding non-atomic texture-cache state), so it needs no atomics/locking. 0 = no inheritance.
+static sint32 s_metalFXInheritScalePercentForNextCreate = 0;
+
+// Derive the effective rescale ratio of an already-overwritten texture as a percentage (rounded).
+static sint32 LatteTexture_deriveScalePercentFromOverwrite(LatteTexture* texture)
+{
+	if (!texture->overwriteInfo.hasResolutionOverwrite || texture->width == 0)
+		return 0;
+	sint32 percent = (sint32)(((sint64)texture->overwriteInfo.width * 100 + texture->width / 2) / texture->width);
+	if (percent > 0 && percent < 100)
+		return percent;
+	return 0;
+}
+
 std::vector<LatteTextureInformation> LatteTexture_QueryCacheInfo()
 {
 	// raise request flag to refresh cache
@@ -986,7 +1007,11 @@ void LatteTexture_RecreateTextureWithDifferentMipSliceCount(LatteTexture* textur
 		newDim = Latte::E_DIM::DIM_2D_ARRAY;
 	else if (newDim == Latte::E_DIM::DIM_1D && newDepth > 1)
 		newDim = Latte::E_DIM::DIM_1D_ARRAY;
+	// Experimental MetalFX: preserve an existing scale ratio across recreation so the recreated
+	// texture keeps sharing its aliasing family's effective ratio (no-op when not MetalFX-scaled).
+	s_metalFXInheritScalePercentForNextCreate = LatteTexture_deriveScalePercentFromOverwrite(texture);
 	LatteTextureView* view = LatteTexture_CreateTexture(newDim, texture->physAddress, physMipAddr, texture->format, texture->width, texture->height, newDepth, texture->pitch, newMipCount, texture->swizzle, texture->tileMode, texture->isDepth, texture->isRenderTarget);
+	s_metalFXInheritScalePercentForNextCreate = 0;
 	cemu_assert(!(view->baseTexture->mipLevels <= 1 && physMipAddr == MPTR_NULL && newMipCount > 1));
 	// copy data from old texture if its dynamically updated
 	if (texture->isUpdatedOnGPU)
@@ -1113,7 +1138,24 @@ LatteTextureView* LatteTexture_CreateMapping(MPTR physAddr, MPTR physMipAddr, si
 	// create new texture
 	if (allowCreateNewDataTexture == false)
 		return nullptr;
+	// Experimental MetalFX: if this new texture aliases memory that already backs a scaled texture,
+	// make it inherit the same effective rescale ratio so the texture-cache copy paths don't bail on a
+	// ratio mismatch (the cause of reduced-resolution color corruption). No-op when MetalFX scaling is
+	// off or no overlapping texture is scaled.
+	if (LatteTexture_getMetalFXRenderScalePercent() > 0)
+	{
+		for (auto& tex : list_overlappingTextures)
+		{
+			sint32 inheritPercent = LatteTexture_deriveScalePercentFromOverwrite(tex);
+			if (inheritPercent > 0)
+			{
+				s_metalFXInheritScalePercentForNextCreate = inheritPercent;
+				break;
+			}
+		}
+	}
 	LatteTextureView* view = LatteTexture_CreateTexture(dimBase, physAddr, physMipAddr, format, width, height, depth, pitch, firstMip + numMip, swizzle, tileMode, isDepth, isRenderTarget);
+	s_metalFXInheritScalePercentForNextCreate = 0;
 	LatteTexture* newTexture = view->baseTexture;
 	LatteTexture_GatherTextureRelations(view->baseTexture);
 	LatteTexture_UpdateTextureFromDynamicChanges(view->baseTexture);
@@ -1349,13 +1391,20 @@ LatteTexture::LatteTexture(Latte::E_DIM dim, MPTR physAddress, MPTR physMipAddre
 	// upscaling active it publishes a sub-100% scale here. We shrink the backing dimensions of
 	// newly-created render targets through the SAME overwriteInfo / GetEffectiveSize() path that
 	// graphic-pack resolution rules use, so the render-target, viewport and scissor scaling machinery
-	// already honors it with no other change. Only render targets are touched (both color and depth,
-	// so they stay the same effective size); textures a graphic pack already resized are left alone;
-	// dimensions never drop below 1px. When the scale is 0 (default/disabled) this is a no-op and the
-	// texture is created at native resolution exactly as before.
-	if (isRenderTarget && !this->overwriteInfo.hasResolutionOverwrite)
+	// already honors it with no other change. Render targets are scaled by the global percent; any
+	// non-render-target created over memory that already backs a scaled texture (an aliasing
+	// reinterpretation / CopySurface destination) inherits that texture's ratio via
+	// s_metalFXInheritScalePercentForNextCreate, so the whole aliasing family shares one effective
+	// ratio and the texture-cache copy paths sync instead of bailing. Textures a graphic pack already
+	// resized are left alone; dimensions never drop below 1px. When the scale is 0 (default/disabled)
+	// and no inherit hint is set this is a no-op and the texture is created at native resolution.
+	if (!this->overwriteInfo.hasResolutionOverwrite)
 	{
-		const sint32 scalePercent = LatteTexture_getMetalFXRenderScalePercent();
+		sint32 scalePercent = 0;
+		if (s_metalFXInheritScalePercentForNextCreate > 0)
+			scalePercent = s_metalFXInheritScalePercentForNextCreate; // alias of an already-scaled texture
+		else if (isRenderTarget)
+			scalePercent = LatteTexture_getMetalFXRenderScalePercent();
 		if (scalePercent > 0 && scalePercent < 100)
 		{
 			sint32 scaledWidth = (sint32)(((sint64)width * scalePercent + 50) / 100);
