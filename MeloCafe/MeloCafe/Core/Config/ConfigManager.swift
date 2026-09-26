@@ -185,6 +185,15 @@ class ConfigManager: ObservableObject {
         }
     }
 
+    var experimentalCommitOnCpIdle: Binding<Bool> {
+        Binding {
+            self.config.experimentalCommitOnCpIdle
+        } set: {
+            self.config.experimentalCommitOnCpIdle = $0
+            self.objectWillChange.send()
+        }
+    }
+
     var experimentalAudioBufferBlocks: Binding<Int> {
         Binding {
             Int(self.config.experimentalAudioBufferBlocks)

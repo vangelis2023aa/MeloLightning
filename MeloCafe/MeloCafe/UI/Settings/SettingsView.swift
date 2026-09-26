@@ -352,6 +352,13 @@ struct SettingsView: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Toggle("Submit GPU Work Earlier", isOn: configManager.experimentalCommitOnCpIdle)
+                            Text("Metal only. When the game briefly runs out of drawing commands to send, hand the queued work to the GPU right away instead of waiting for more to pile up. Lets the GPU start sooner and overlap with the CPU, which can raise the frame rate when the game is CPU-bound. Does not make the CPU work any harder. Rarely, submitting more often can add a little overhead.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 } header: {
                     Text("Experimental Performance")

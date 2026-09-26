@@ -157,6 +157,11 @@ bool ActiveSettings::ExperimentalPresentDontCare()
 	return GetConfig().experimental_present_dontcare;
 }
 
+bool ActiveSettings::ExperimentalCommitOnCpIdle()
+{
+	return GetConfig().experimental_commit_on_cp_idle;
+}
+
 bool ActiveSettings::ExperimentalMetalFXEnable()
 {
 	return GetConfig().experimental_metalfx_enable;

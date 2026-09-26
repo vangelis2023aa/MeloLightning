@@ -797,8 +797,24 @@ void MetalRenderer::Flush(bool waitIdle)
 
 void MetalRenderer::NotifyLatteCommandProcessorIdle()
 {
-    //if (m_commitOnIdle)
-    //    CommitCommandBuffer();
+    // Experimental: the Latte command processor calls this when its ring buffer has genuinely drained
+    // (it has run out of guest commands to decode and is about to wait). When the frame is
+    // CPU-throughput-bound the GPU is frequently starved, sitting idle until the commit threshold is
+    // reached. Committing the pending (recorded but not yet submitted) draws at this idle point lets
+    // the GPU begin that work immediately instead of waiting for more draws to accumulate, improving
+    // CPU/GPU overlap. CommitCommandBuffer() ends the open encoder, no-ops without a command buffer,
+    // and is guarded against double-commit, so this is safe to call here. It performs the same GPU
+    // work, just sooner (one extra submission), so it does not spin harder or trade thermals for FPS.
+    // Default OFF => unchanged no-op behavior.
+    //
+    // Guarded on an uncommitted command buffer that has recorded draws: m_recordedDrawcalls is only
+    // reset when the *next* command buffer is created, so after a commit it stays > 0 until then. This
+    // idle hook can fire on every iteration of a bounded-backoff stall (LatteCommandProcessor.cpp:549),
+    // so the m_commited check keeps us from re-entering CommitCommandBuffer/ProcessFinishedCommandBuffers
+    // repeatedly for the same already-submitted batch.
+    if (ActiveSettings::ExperimentalCommitOnCpIdle() && m_recordedDrawcalls > 0
+        && m_currentCommandBuffer.m_commandBuffer && !m_currentCommandBuffer.m_commited)
+        CommitCommandBuffer();
 }
 
 bool MetalRenderer::ImguiBegin(bool mainWindow)
