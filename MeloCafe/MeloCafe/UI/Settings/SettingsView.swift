@@ -453,6 +453,18 @@ struct SettingsView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Picker("Anti-Clip / Limiter (Experimental)", selection: configManager.experimentalAudioAntiClip) {
+                            Text("Off").tag(0)
+                            Text("Soft Limiter").tag(1)
+                            Text("Headroom -3 dB").tag(2)
+                            Text("Headroom -6 dB").tag(3)
+                        }
+                        Text("Experimental. Reduces harsh distortion on loud audio (e.g. dialogue over music) that the console's mixer clips at full scale. \"Soft Limiter\" leaves quiet audio untouched and only rounds peaks that would clip (preserves loudness). \"Headroom\" lowers the whole mix a fixed amount so peaks stay below clipping (also lowers overall volume). \"Off\" restores normal behavior.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                     
                     VStack(alignment: .leading) {
                         Text("TV Volume: \(Int(configManager.tvVolume.wrappedValue))%")

@@ -177,6 +177,9 @@ static CPUMode toCPUMode(ObjCCPUMode mode) {
 - (int)experimentalAudioBufferBlocks       { return GetConfig().experimental_audio_buffer_blocks.GetValue(); }
 - (void)setExperimentalAudioBufferBlocks:(int)v { GetConfig().experimental_audio_buffer_blocks = v; autoSave(); }
 
+- (int)experimentalAudioAntiClip           { return GetConfig().experimental_audio_anti_clip.GetValue(); }
+- (void)setExperimentalAudioAntiClip:(int)v { GetConfig().experimental_audio_anti_clip = v; autoSave(); }
+
 - (BOOL)experimentalMetalFXEnable          { return GetConfig().experimental_metalfx_enable.GetValue(); }
 - (void)setExperimentalMetalFXEnable:(BOOL)v { GetConfig().experimental_metalfx_enable = v; autoSave(); }
 

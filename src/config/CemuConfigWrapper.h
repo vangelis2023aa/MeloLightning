@@ -131,6 +131,7 @@ typedef NS_ENUM(NSInteger, ObjCPrecompiledShaderOption) {
 @property (nonatomic) BOOL experimentalExtendedCommitThreshold;
 @property (nonatomic) BOOL experimentalSurfaceCopyDestDontCare;
 @property (nonatomic) int experimentalAudioBufferBlocks;
+@property (nonatomic) int experimentalAudioAntiClip;
 
 // Experimental MetalFX spatial upscaling (Metal only; see "Experimental Graphics" settings section)
 @property (nonatomic) BOOL experimentalMetalFXEnable;

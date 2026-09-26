@@ -182,6 +182,11 @@ bool ActiveSettings::ExperimentalMetalFXSharpPresent()
 	return GetConfig().experimental_metalfx_sharp_present;
 }
 
+sint32 ActiveSettings::ExperimentalAudioAntiClip()
+{
+	return GetConfig().experimental_audio_anti_clip.GetValue();
+}
+
 GraphicAPI ActiveSettings::GetGraphicsAPI()
 {
 	const GraphicAPI api = g_current_game_profile->GetGraphicsAPI().value_or(GetConfig().graphic_api);

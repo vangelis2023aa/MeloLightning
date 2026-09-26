@@ -550,6 +550,14 @@ struct CemuConfig
 	// capacity (IAudioAPI::kBlockCount) at use; the ring is already allocated for that many blocks.
 	ConfigValue<sint32> experimental_audio_buffer_blocks{ 0 };
 
+	// Experimental anti-clip / soft limiter applied to the final mixed AX sample right before the
+	// int16 saturation in the audio output stage. The AX mix sums voices with no headroom and hard-
+	// clamps to int16, so loud passages (e.g. dialogue over music) can flat-top and distort. This
+	// reshapes that final stage. 0 = disabled = byte-identical hard clamp (default). 1 = soft-knee
+	// limiter (quiet audio untouched, only would-be-clipped peaks are rounded). 2 = -3 dB headroom.
+	// 3 = -6 dB headroom. Read once per audio frame; does not touch decode/resample/RT callback.
+	ConfigValue<sint32> experimental_audio_anti_clip{ 0 };
+
 	// Experimental MetalFX spatial upscaling (iOS, Metal only, requires iOS 16+ and a supported
 	// device). All default so the renderer behaves EXACTLY as without these options:
 	//  - enable == false      => present path unchanged, no MetalFX resources allocated.

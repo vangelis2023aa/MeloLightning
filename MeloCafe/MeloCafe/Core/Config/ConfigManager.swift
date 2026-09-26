@@ -185,6 +185,15 @@ class ConfigManager: ObservableObject {
         }
     }
 
+    var experimentalAudioAntiClip: Binding<Int> {
+        Binding {
+            Int(self.config.experimentalAudioAntiClip)
+        } set: {
+            self.config.experimentalAudioAntiClip = Int32($0)
+            self.objectWillChange.send()
+        }
+    }
+
     var experimentalMetalFXEnable: Binding<Bool> {
         Binding {
             self.config.experimentalMetalFXEnable

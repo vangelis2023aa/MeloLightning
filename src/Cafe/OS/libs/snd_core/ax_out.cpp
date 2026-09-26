@@ -4,9 +4,48 @@
 #include "audio/IAudioAPI.h"
 //#include "ax.h"
 #include "config/CemuConfig.h"
+#include "config/ActiveSettings.h"
+#include <cmath>
 
 namespace snd_core
 {
+	// Experimental anti-clip / soft limiter applied to the final mixed AX sample right before the
+	// int16 saturation. mode: 0 = off (byte-identical to the original hard clamp), 1 = soft-knee
+	// limiter (quiet audio untouched, only would-be-clipped peaks are rounded instead of flat-
+	// topped), 2 = -3 dB headroom, 3 = -6 dB headroom. See CemuConfig experimental_audio_anti_clip.
+	static inline sint16 AXOut_FinalizeSample(sint32 v, sint32 mode)
+	{
+		switch (mode)
+		{
+		case 1:
+		{
+			// Soft-knee saturating limiter. Identity below the knee, so samples that never reach the
+			// rail pass through unchanged; above it, |x| is mapped smoothly toward (but never past)
+			// full scale. This rounds the peaks that the hard clamp below would otherwise flat-top.
+			const float knee = 0.6f;
+			float x = (float)v * (1.0f / 32768.0f);
+			float a = std::fabs(x);
+			if (a > knee)
+			{
+				const float range = 1.0f - knee;
+				float shaped = knee + range * (1.0f - std::exp(-(a - knee) / range));
+				x = (x < 0.0f) ? -shaped : shaped;
+				v = (sint32)(x * 32768.0f);
+			}
+			break;
+		}
+		case 2: // -3 dB (x0.70709)
+			v = (sint32)(((sint64)v * 23170) >> 15);
+			break;
+		case 3: // -6 dB (x0.5)
+			v = (sint32)(((sint64)v * 16384) >> 15);
+			break;
+		default: // 0 = off
+			break;
+		}
+		return (sint16)std::min(std::max(v, -32768), 32767);
+	}
+
 	uint32 numProcessedFrames = 0;
 
 	void resetNumProcessedFrames()
@@ -219,6 +258,7 @@ namespace snd_core
 	void AXOut_SubmitTVFrame(sint32 frameIndex)
 	{
 		sint32 numSamples = AIGetSamplesPerChannel(AX_DEV_TV);
+		const sint32 antiClipMode = ActiveSettings::ExperimentalAudioAntiClip();
 		if (__AXMode[AX_DEV_TV] == AX_MODE_6CH)
 		{
 			sint32* inputChannel0 = __AXTVBuffer48.GetPtr() + numSamples * 0;
@@ -246,14 +286,14 @@ namespace snd_core
 				Back Left - BL			4
 				Back Right - BR			5
 				*/
-				dmaOutputBuffer[0] = _swapEndianS16((sint16)std::min(std::max(_swapEndianS32(*inputChannel0), -32768), 32767));
-				dmaOutputBuffer[1] = _swapEndianS16((sint16)std::min(std::max(_swapEndianS32(*inputChannel1), -32768), 32767));
+				dmaOutputBuffer[0] = _swapEndianS16((sint16)AXOut_FinalizeSample(_swapEndianS32(*inputChannel0), antiClipMode));
+				dmaOutputBuffer[1] = _swapEndianS16((sint16)AXOut_FinalizeSample(_swapEndianS32(*inputChannel1), antiClipMode));
 
-				dmaOutputBuffer[4] = _swapEndianS16((sint16)std::min(std::max(_swapEndianS32(*inputChannel2), -32768), 32767));
-				dmaOutputBuffer[5] = _swapEndianS16((sint16)std::min(std::max(_swapEndianS32(*inputChannel3), -32768), 32767));
+				dmaOutputBuffer[4] = _swapEndianS16((sint16)AXOut_FinalizeSample(_swapEndianS32(*inputChannel2), antiClipMode));
+				dmaOutputBuffer[5] = _swapEndianS16((sint16)AXOut_FinalizeSample(_swapEndianS32(*inputChannel3), antiClipMode));
 
-				dmaOutputBuffer[2] = _swapEndianS16((sint16)std::min(std::max(_swapEndianS32(*inputChannel4), -32768), 32767));
-				dmaOutputBuffer[3] = _swapEndianS16((sint16)std::min(std::max(_swapEndianS32(*inputChannel5), -32768), 32767));
+				dmaOutputBuffer[2] = _swapEndianS16((sint16)AXOut_FinalizeSample(_swapEndianS32(*inputChannel4), antiClipMode));
+				dmaOutputBuffer[3] = _swapEndianS16((sint16)AXOut_FinalizeSample(_swapEndianS32(*inputChannel5), antiClipMode));
 				dmaOutputBuffer += 6;
 				// next sample
 				inputChannel0++;
@@ -272,8 +312,8 @@ namespace snd_core
 			sint16* dmaOutputBuffer = __AXTVDMABuffers[frameIndex];
 			for (sint32 i = 0; i < numSamples; i++)
 			{
-				dmaOutputBuffer[0] = _swapEndianS16((sint16)std::min(std::max(_swapEndianS32(*inputChannel0), -32768), 32767));
-				dmaOutputBuffer[1] = _swapEndianS16((sint16)std::min(std::max(_swapEndianS32(*inputChannel1), -32768), 32767));
+				dmaOutputBuffer[0] = _swapEndianS16((sint16)AXOut_FinalizeSample(_swapEndianS32(*inputChannel0), antiClipMode));
+				dmaOutputBuffer[1] = _swapEndianS16((sint16)AXOut_FinalizeSample(_swapEndianS32(*inputChannel1), antiClipMode));
 				dmaOutputBuffer += 2;
 				// next sample
 				inputChannel0++;
@@ -287,7 +327,7 @@ namespace snd_core
 			sint16* dmaOutputBuffer = __AXTVDMABuffers[frameIndex];
 			for (sint32 i = 0; i < numSamples; i++)
 			{
-				dmaOutputBuffer[0] = _swapEndianS16((sint16)std::min(std::max(_swapEndianS32(*inputChannel0), -32768), 32767));
+				dmaOutputBuffer[0] = _swapEndianS16((sint16)AXOut_FinalizeSample(_swapEndianS32(*inputChannel0), antiClipMode));
 				dmaOutputBuffer++;
 				// next sample
 				inputChannel0++;
@@ -329,6 +369,7 @@ namespace snd_core
 	void AXOut_SubmitDRCFrame(sint32 frameIndex)
 	{
 		sint32 numSamples = AIGetSamplesPerChannel(AX_DEV_DRC);
+		const sint32 antiClipMode = ActiveSettings::ExperimentalAudioAntiClip();
 		if (__AXMode[AX_DEV_DRC] == AX_MODE_6CH)
 		{
 			sint32* inputChannel0 = __AXDRCBuffer48.GetPtr() + numSamples * 0;
@@ -338,8 +379,8 @@ namespace snd_core
 			sint16* dmaOutputBuffer = AIGetCurrentDMABuffer(AX_DEV_DRC);
 			for (sint32 i = 0; i < numSamples; i++)
 			{
-				dmaOutputBuffer[0] = _swapEndianS16((sint16)std::min(std::max(_swapEndianS32(*inputChannel0), -32768), 32767));
-				dmaOutputBuffer[1] = _swapEndianS16((sint16)std::min(std::max(_swapEndianS32(*inputChannel1), -32768), 32767));
+				dmaOutputBuffer[0] = _swapEndianS16((sint16)AXOut_FinalizeSample(_swapEndianS32(*inputChannel0), antiClipMode));
+				dmaOutputBuffer[1] = _swapEndianS16((sint16)AXOut_FinalizeSample(_swapEndianS32(*inputChannel1), antiClipMode));
 
 				dmaOutputBuffer[4] = 0;
 				dmaOutputBuffer[5] = 0;
@@ -362,8 +403,8 @@ namespace snd_core
 			sint16* dmaOutputBuffer = __AXDRCDMABuffers[frameIndex];
 			for (sint32 i = 0; i < numSamples; i++)
 			{
-				dmaOutputBuffer[0] = _swapEndianS16((sint16)std::min(std::max(_swapEndianS32(*inputChannel0), -32768), 32767));
-				dmaOutputBuffer[1] = _swapEndianS16((sint16)std::min(std::max(_swapEndianS32(*inputChannel1), -32768), 32767));
+				dmaOutputBuffer[0] = _swapEndianS16((sint16)AXOut_FinalizeSample(_swapEndianS32(*inputChannel0), antiClipMode));
+				dmaOutputBuffer[1] = _swapEndianS16((sint16)AXOut_FinalizeSample(_swapEndianS32(*inputChannel1), antiClipMode));
 				dmaOutputBuffer += 2;
 				// next sample
 				inputChannel0++;
@@ -379,7 +420,7 @@ namespace snd_core
 			for (sint32 i = 0; i < numSamples; i++)
 			{
 				// write mono input as stereo output
-				dmaOutputBuffer[1] = dmaOutputBuffer[0] = _swapEndianS16((sint16)std::min(std::max(_swapEndianS32(*inputChannel0), -32768), 32767));
+				dmaOutputBuffer[1] = dmaOutputBuffer[0] = _swapEndianS16((sint16)AXOut_FinalizeSample(_swapEndianS32(*inputChannel0), antiClipMode));
 				dmaOutputBuffer += 2;
 				// next sample
 				inputChannel0++;

@@ -143,6 +143,10 @@ public:
 	[[nodiscard]] static bool   ExperimentalMetalFXDirectInput();
 	[[nodiscard]] static bool   ExperimentalMetalFXSharpPresent();
 
+// Experimental audio anti-clip / soft limiter (final AX output stage). 0 = off (byte-identical),
+// 1 = soft-knee limiter, 2 = -3 dB headroom, 3 = -6 dB headroom. See CemuConfig experimental_audio_anti_clip.
+[[nodiscard]] static sint32 ExperimentalAudioAntiClip();
+
 private:
 	inline static bool s_setPathsCalled = false;
 	// dump options
