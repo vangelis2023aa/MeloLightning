@@ -17,6 +17,9 @@
 #include "input/InputManager.h"
 #include "Cafe/OS/libs/swkbd/swkbd.h"
 
+#include <chrono>
+#include <algorithm>
+
 uint32 prevScissorX = 0;
 uint32 prevScissorY = 0;
 uint32 prevScissorWidth = 0;
@@ -682,12 +685,203 @@ void LatteRenderTarget_trackUpdates()
 	}
 }
 
+// M6 (Adaptive Render Work): a closed-loop controller that lowers the MetalFX internal
+// render scale in discrete steps when the GPU is under sustained load and raises it back
+// toward the user's slider value when there is headroom. Default-OFF and MetalFX-gated.
+//
+// Soundness / thermal safety: the render-scale percent is consumed per-texture-CREATE
+// (LatteTexture ctor), so a change reaches only render targets built afterward; long-lived
+// main-scene targets keep their scale until the cache recreates them. To keep this from
+// silently softening the image for no benefit (e.g. when the frame is CPU-bound, or when the
+// main RT simply has not been recreated at the new scale), every down-step is verified: if
+// average wall-clock frame time does not actually improve over the next evaluation window,
+// the step is undone and adaptation is held for a cooldown. That makes the mechanism
+// self-limiting — on workloads where it cannot help, it converges back to the slider value
+// and changes nothing. Runs only on the Latte thread (single-threaded access); the render
+// scale setter is atomic.
+namespace
+{
+	struct AdaptiveRenderWorkController
+	{
+		static constexpr sint32 kStep           = 5;      // percent per adjustment
+		static constexpr sint32 kFloor          = 50;     // never scale below this
+		static constexpr double kEvalSeconds    = 1.0;    // dwell before each decision
+		static constexpr uint32 kMinFramesEval  = 8;      // and at least this many samples
+		static constexpr double kPressureBusy   = 0.90;   // gpuActive/wall >= this => under load
+		static constexpr double kRelaxBusy       = 0.70;  // gpuActive/wall <= this => headroom
+		static constexpr double kMinImproveFrac = 0.03;   // a down-step must cut wall time >=3%
+		static constexpr int    kHoldEvals      = 4;      // windows to hold after an ineffective step
+		static constexpr int    kRelaxEvals     = 2;      // relaxed windows required before a step up
+
+		enum class Phase { Steady, PendingDownEval };
+
+		bool   active   = false;   // captured a ceiling and begun controlling?
+		sint32 ceiling  = 0;       // slider anchor = max quality, captured on first >0 read
+		sint32 current  = 0;       // scale we last wrote / believe is in effect
+
+		bool   haveStamp = false;
+		std::chrono::steady_clock::time_point lastStamp{};
+		std::chrono::steady_clock::time_point windowStart{};
+		double wallAccumUs = 0.0;
+		double gpuAccumUs  = 0.0;
+		uint32 frames      = 0;
+
+		Phase  phase = Phase::Steady;
+		double preStepWallAvgUs = 0.0;
+		int    holdEvals   = 0;
+		int    relaxStreak = 0;
+
+		void reset() { *this = AdaptiveRenderWorkController{}; }
+	};
+
+	AdaptiveRenderWorkController s_adaptiveRW;
+}
+
+static void LatteRenderTarget_updateAdaptiveRenderWork()
+{
+	auto& c = s_adaptiveRW;
+
+	const sint32 percentNow = LatteTexture_getMetalFXRenderScalePercent();
+
+	// percent==0 => MetalFX inactive (or renderer torn down): nothing to control. Reset so a
+	// fresh renderer lifetime re-captures the slider value as the ceiling.
+	if (percentNow <= 0)
+	{
+		if (c.active)
+			c.reset();
+		return;
+	}
+
+	// Toggle OFF: restore the slider value if we had stepped away from it, then idle.
+	if (!ActiveSettings::ExperimentalAdaptiveRenderWork())
+	{
+		if (c.active)
+		{
+			if (c.ceiling > 0 && c.current != c.ceiling)
+				LatteTexture_setMetalFXRenderScalePercent(c.ceiling);
+			c.reset();
+		}
+		return;
+	}
+
+	// First controlled frame of this renderer lifetime: the current percent is the user's
+	// slider value; treat it as the ceiling (max quality) and start from there.
+	if (!c.active)
+	{
+		c.reset();
+		c.active  = true;
+		c.ceiling = percentNow;
+		c.current = percentNow;
+	}
+
+	// Wall-clock frame period, independent of the emulator's TSC-based gpu timer.
+	const auto now = std::chrono::steady_clock::now();
+	if (!c.haveStamp)
+	{
+		c.lastStamp   = now;
+		c.windowStart = now;
+		c.haveStamp   = true;
+		return; // need one interval before a period can be measured
+	}
+	const double frameWallUs = std::chrono::duration<double, std::micro>(now - c.lastStamp).count();
+	c.lastStamp = now;
+
+	// gpu-active time for the just-finished frame (Latte-thread busy time, excludes present).
+	const uint64 gpuTicks  = performanceMonitor.gpuTime_frameTime.getPreviousFrameValue();
+	const double frameGpuUs = (double)PPCTimer_tscToMicroseconds(gpuTicks);
+
+	// Ignore non-representative outliers (load screens, debugger stops, warmup).
+	if (frameWallUs > 0.0 && frameWallUs < 1000000.0)
+	{
+		c.wallAccumUs += frameWallUs;
+		c.gpuAccumUs  += (frameGpuUs > 0.0 ? frameGpuUs : 0.0);
+		c.frames++;
+	}
+
+	const double windowSeconds = std::chrono::duration<double>(now - c.windowStart).count();
+	if (windowSeconds < AdaptiveRenderWorkController::kEvalSeconds || c.frames < AdaptiveRenderWorkController::kMinFramesEval)
+		return; // keep accumulating until the dwell elapses with enough samples
+
+	const double wallAvgUs = c.wallAccumUs / (double)c.frames;
+	const double gpuAvgUs  = c.gpuAccumUs / (double)c.frames;
+	const double busy      = (wallAvgUs > 0.0) ? (gpuAvgUs / wallAvgUs) : 0.0;
+
+	// begin a fresh accumulation window
+	c.windowStart = now;
+	c.wallAccumUs = 0.0;
+	c.gpuAccumUs  = 0.0;
+	c.frames      = 0;
+
+	// Cooldown after an ineffective step: hold quality steady, do not thrash.
+	if (c.holdEvals > 0)
+	{
+		c.holdEvals--;
+		c.phase = AdaptiveRenderWorkController::Phase::Steady;
+		return;
+	}
+
+	// Verify the previous down-step actually improved wall time.
+	if (c.phase == AdaptiveRenderWorkController::Phase::PendingDownEval)
+	{
+		c.phase = AdaptiveRenderWorkController::Phase::Steady;
+		const bool improved = (wallAvgUs <= c.preStepWallAvgUs * (1.0 - AdaptiveRenderWorkController::kMinImproveFrac));
+		if (!improved)
+		{
+			// Step did not help (CPU-bound, or the main RT was not recreated at the new
+			// scale): undo it and hold, so quality is never spent for no frame-rate gain.
+			const sint32 restored = std::min(c.ceiling, c.current + AdaptiveRenderWorkController::kStep);
+			if (restored != c.current)
+			{
+				c.current = restored;
+				LatteTexture_setMetalFXRenderScalePercent(restored);
+			}
+			c.holdEvals   = AdaptiveRenderWorkController::kHoldEvals;
+			c.relaxStreak = 0;
+			return;
+		}
+		// improved: keep the step and allow further adaptation below.
+	}
+
+	if (busy >= AdaptiveRenderWorkController::kPressureBusy && c.current > AdaptiveRenderWorkController::kFloor)
+	{
+		// Sustained GPU load with quality to spare -> step down, verify next window.
+		const sint32 next = std::max(AdaptiveRenderWorkController::kFloor, c.current - AdaptiveRenderWorkController::kStep);
+		if (next != c.current)
+		{
+			c.preStepWallAvgUs = wallAvgUs;
+			c.current = next;
+			LatteTexture_setMetalFXRenderScalePercent(next);
+			c.phase = AdaptiveRenderWorkController::Phase::PendingDownEval;
+		}
+		c.relaxStreak = 0;
+	}
+	else if (busy <= AdaptiveRenderWorkController::kRelaxBusy && c.current < c.ceiling)
+	{
+		// Sustained headroom -> creep quality back up toward the slider value.
+		if (++c.relaxStreak >= AdaptiveRenderWorkController::kRelaxEvals)
+		{
+			const sint32 next = std::min(c.ceiling, c.current + AdaptiveRenderWorkController::kStep);
+			if (next != c.current)
+			{
+				c.current = next;
+				LatteTexture_setMetalFXRenderScalePercent(next);
+			}
+			c.relaxStreak = 0;
+		}
+	}
+	else
+	{
+		c.relaxStreak = 0;
+	}
+}
+
 void LatteRenderTarget_itHLESwapScanBuffer()
 {
 	performanceMonitor.cycle[performanceMonitor.cycleIndex].frameCounter++;
 	if(LatteGPUState.frameCounter > 5)
 		performanceMonitor.gpuTime_frameTime.endMeasuring();
 	LattePerformanceMonitor_frameEnd();
+	LatteRenderTarget_updateAdaptiveRenderWork();
 	LatteGPUState.frameCounter++;
 	g_renderer->SwapBuffers(true, true);
 

@@ -187,6 +187,11 @@ bool ActiveSettings::ExperimentalPartialRendering()
 	return GetConfig().experimental_partial_rendering;
 }
 
+bool ActiveSettings::ExperimentalAdaptiveRenderWork()
+{
+	return GetConfig().experimental_adaptive_render_work;
+}
+
 bool ActiveSettings::ExperimentalMetalFXEnable()
 {
 	return GetConfig().experimental_metalfx_enable;

@@ -464,6 +464,13 @@ struct SettingsView: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Toggle("Adaptive Resolution", isOn: configManager.experimentalAdaptiveRenderWork)
+                            Text("Experimental. Automatically lowers the internal resolution in small steps when the GPU can't keep up, then raises it back toward the slider value once there's headroom — trading a little sharpness for smoother frames only when needed. If a step down doesn't actually help (for example when the game is limited by the CPU, not the GPU), it undoes that step and holds, so it never keeps softening the image for nothing. Because the resolution is chosen when each buffer is first created, changes take effect gradually as new scenes load rather than instantly. Only has an effect while MetalFX is enabled; off means the resolution stays fixed at the slider value.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                     } header: {
                         Text("Experimental Graphics")

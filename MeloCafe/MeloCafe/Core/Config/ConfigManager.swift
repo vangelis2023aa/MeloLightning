@@ -239,6 +239,15 @@ class ConfigManager: ObservableObject {
         }
     }
 
+    var experimentalAdaptiveRenderWork: Binding<Bool> {
+        Binding {
+            self.config.experimentalAdaptiveRenderWork
+        } set: {
+            self.config.experimentalAdaptiveRenderWork = $0
+            self.objectWillChange.send()
+        }
+    }
+
     var experimentalAudioBufferBlocks: Binding<Int> {
         Binding {
             Int(self.config.experimentalAudioBufferBlocks)
