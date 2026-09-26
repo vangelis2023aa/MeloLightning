@@ -157,11 +157,6 @@ sint32 ActiveSettings::ExperimentalMetalFXRenderScale()
 	return GetConfig().experimental_metalfx_render_scale.GetValue();
 }
 
-sint32 ActiveSettings::ExperimentalMetalFXColorProcessing()
-{
-	return GetConfig().experimental_metalfx_color_processing.GetValue();
-}
-
 GraphicAPI ActiveSettings::GetGraphicsAPI()
 {
 	const GraphicAPI api = g_current_game_profile->GetGraphicsAPI().value_or(GetConfig().graphic_api);

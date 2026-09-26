@@ -194,15 +194,6 @@ class ConfigManager: ObservableObject {
         }
     }
 
-    var experimentalMetalFXColorProcessing: Binding<Int> {
-        Binding {
-            Int(self.config.experimentalMetalFXColorProcessing)
-        } set: {
-            self.config.experimentalMetalFXColorProcessing = Int32($0)
-            self.objectWillChange.send()
-        }
-    }
-
     var renderUpsideDown: Binding<Bool> {
         Binding {
             self.config.renderUpsideDown

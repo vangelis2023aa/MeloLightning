@@ -626,7 +626,6 @@ private:
 	class MetalFXSpatialUpscaler* m_metalFXUpscaler = nullptr;
 	bool m_metalFXActive = false;         // master latch: false => present path unchanged
 	sint32 m_metalFXRenderScale = 100;    // internal-resolution percentage (100 == native, no scaling)
-	sint32 m_metalFXColorProcessing = 0;  // 0 Perceptual / 1 Linear / 2 HDR (SpatialScalerColorProcessingMode)
 
 	// State
 	MetalState m_state;

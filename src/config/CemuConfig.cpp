@@ -301,7 +301,6 @@ XMLConfigParser CemuConfig::Load(XMLConfigParser& parser)
 	experimental_audio_buffer_blocks = experimental.get("AudioBufferBlocks", 0);
 	experimental_metalfx_enable = experimental.get("MetalFXEnable", false);
 	experimental_metalfx_render_scale = experimental.get("MetalFXRenderScale", 67);
-	experimental_metalfx_color_processing = experimental.get("MetalFXColorProcessing", 0);
 
 	// input
 	auto input = parser.get("Input");
@@ -488,7 +487,6 @@ XMLConfigParser CemuConfig::Save(XMLConfigParser& parser)
 	experimental.set("AudioBufferBlocks", experimental_audio_buffer_blocks.GetValue());
 	experimental.set("MetalFXEnable", experimental_metalfx_enable.GetValue());
 	experimental.set("MetalFXRenderScale", experimental_metalfx_render_scale.GetValue());
-	experimental.set("MetalFXColorProcessing", experimental_metalfx_color_processing.GetValue());
 
 	// input
 	auto input = config.set("Input");

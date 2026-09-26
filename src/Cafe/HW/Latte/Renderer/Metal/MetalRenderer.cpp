@@ -311,7 +311,6 @@ MetalRenderer::MetalRenderer()
     // renderer. Nothing is re-read per frame; the present hot path is a single bool test.
     m_metalFXActive = false;
     m_metalFXRenderScale = 100;
-    m_metalFXColorProcessing = 0;
     m_metalFXUpscaler = nullptr;
 
     if (ActiveSettings::ExperimentalMetalFXEnable())
@@ -326,7 +325,6 @@ MetalRenderer::MetalRenderer()
             if (MetalFXSpatialUpscaler::IsSupported(m_device))
             {
                 m_metalFXRenderScale = scale;
-                m_metalFXColorProcessing = ActiveSettings::ExperimentalMetalFXColorProcessing();
                 m_metalFXUpscaler = new MetalFXSpatialUpscaler(m_device);
                 m_metalFXActive = true;
                 cemuLog_log(LogType::Force, "MetalFX: experimental spatial upscaling enabled at {}% internal resolution", m_metalFXRenderScale);
@@ -561,6 +559,24 @@ void MetalRenderer::HandleScreenshotRequest(LatteTextureView* texView, bool padV
         SaveScreenshot(rgb_data, width, height, !padView);
 }
 
+// True for the sRGB variants of the pixel formats a scanout present source can use. A texture with
+// one of these formats is linearized by the hardware on sample, so any reader (including MetalFX)
+// receives LINEAR values; a plain UNORM format returns the stored (gamma-encoded / perceptual)
+// values unmodified. This distinction drives the MetalFX color-processing mode below.
+static bool MetalFX_PixelFormatIsSRGB(MTL::PixelFormat format)
+{
+    switch (format)
+    {
+    case MTL::PixelFormatRGBA8Unorm_sRGB:
+    case MTL::PixelFormatBGRA8Unorm_sRGB:
+    case MTL::PixelFormatBGR10_XR_sRGB:
+    case MTL::PixelFormatBGRA10_XR_sRGB:
+        return true;
+    default:
+        return false;
+    }
+}
+
 MTL::Texture* MetalRenderer::TryApplyMetalFX(MTL::Texture* sourceTexture, sint32 targetWidth, sint32 targetHeight)
 {
     if (!sourceTexture || !m_metalFXUpscaler)
@@ -579,9 +595,18 @@ MTL::Texture* MetalRenderer::TryApplyMetalFX(MTL::Texture* sourceTexture, sint32
 
     const MTL::PixelFormat colorFormat = sourceTexture->pixelFormat();
 
+    // The scaler must be told the color space of the values it will READ from the color texture, i.e.
+    // AFTER any automatic sRGB->linear conversion the pixel format implies. An sRGB format linearizes
+    // on sample so the scaler sees LINEAR data (Linear mode); a plain UNORM format holding the game's
+    // gamma-encoded scanout returns those values unmodified (Perceptual mode). Deriving the mode from
+    // the format (rather than a user setting) is the fix for the "MetalFX is much darker" artifact:
+    // an sRGB present source fed as Perceptual made MetalFX linearize a second time, darkening every
+    // pixel. HDR is never applicable here (the Wii U scanout is LDR 8-bit).
+    const sint32 colorProcessingMode = MetalFX_PixelFormatIsSRGB(colorFormat) ? 1 /*Linear*/ : 0 /*Perceptual*/;
+
     // (Re)configure lazily; cheap no-op when the key is unchanged. On any failure the upscaler releases
     // its partial state and returns false, and we fall back to the original source texture.
-    if (!m_metalFXUpscaler->Configure(inputWidth, inputHeight, outputWidth, outputHeight, colorFormat, m_metalFXColorProcessing))
+    if (!m_metalFXUpscaler->Configure(inputWidth, inputHeight, outputWidth, outputHeight, colorFormat, colorProcessingMode))
         return sourceTexture;
 
     MTL::Texture* inputTexture = m_metalFXUpscaler->GetInputTexture();

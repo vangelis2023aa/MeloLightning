@@ -137,7 +137,6 @@ public:
 	// and latched; see CemuConfig experimental_metalfx_* flags.
 	[[nodiscard]] static bool   ExperimentalMetalFXEnable();
 	[[nodiscard]] static sint32 ExperimentalMetalFXRenderScale();
-	[[nodiscard]] static sint32 ExperimentalMetalFXColorProcessing();
 
 private:
 	inline static bool s_setPathsCalled = false;

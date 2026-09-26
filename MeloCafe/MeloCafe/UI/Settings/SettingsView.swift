@@ -370,17 +370,6 @@ struct SettingsView: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
-
-                        VStack(alignment: .leading, spacing: 4) {
-                            Picker("Color Processing", selection: configManager.experimentalMetalFXColorProcessing) {
-                                Text("Perceptual (Default)").tag(0)
-                                Text("Linear").tag(1)
-                                Text("HDR").tag(2)
-                            }
-                            Text("How MetalFX interprets the color data it upscales. Perceptual matches standard (sRGB) output and is the safe default; change this only if the upscaled image looks too dark, washed out, or clipped.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
                     } header: {
                         Text("Experimental Graphics")
                     } footer: {

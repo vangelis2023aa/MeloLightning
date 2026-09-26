@@ -555,10 +555,11 @@ struct CemuConfig
 	//  - render_scale         => internal render-target resolution percentage (100 = native = no
 	//                            reduction and no upscale; lower values render cheaper then MetalFX
 	//                            upscales to native). Only consulted when enable is true.
-	//  - color_processing     => MTLFXSpatialScalerColorProcessingMode (0 Perceptual / 1 Linear / 2 HDR).
+	// The MetalFX color-processing mode is NOT a user setting: it is derived at present time from the
+	// scanout pixel format (sRGB format => Linear, plain UNORM => Perceptual) so the upscale is always
+	// color-neutral. Exposing it as a knob previously allowed a mismatch that darkened the image.
 	ConfigValue<bool>   experimental_metalfx_enable{ false };
 	ConfigValue<sint32> experimental_metalfx_render_scale{ 67 };
-	ConfigValue<sint32> experimental_metalfx_color_processing{ 0 };
 
 	XMLConfigParser Load(XMLConfigParser& parser);
 	XMLConfigParser Save(XMLConfigParser& parser);
