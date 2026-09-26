@@ -230,6 +230,15 @@ class ConfigManager: ObservableObject {
         }
     }
 
+    var experimentalPartialRendering: Binding<Bool> {
+        Binding {
+            self.config.experimentalPartialRendering
+        } set: {
+            self.config.experimentalPartialRendering = $0
+            self.objectWillChange.send()
+        }
+    }
+
     var experimentalAudioBufferBlocks: Binding<Int> {
         Binding {
             Int(self.config.experimentalAudioBufferBlocks)

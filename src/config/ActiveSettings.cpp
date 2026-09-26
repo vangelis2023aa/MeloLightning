@@ -182,6 +182,11 @@ bool ActiveSettings::ExperimentalWorkerTextureDecode()
 	return GetConfig().experimental_worker_texture_decode;
 }
 
+bool ActiveSettings::ExperimentalPartialRendering()
+{
+	return GetConfig().experimental_partial_rendering;
+}
+
 bool ActiveSettings::ExperimentalMetalFXEnable()
 {
 	return GetConfig().experimental_metalfx_enable;

@@ -87,6 +87,10 @@ LatteTextureMtl::LatteTextureMtl(class MetalRenderer* mtlRenderer, Latte::E_DIM 
 
 LatteTextureMtl::~LatteTextureMtl()
 {
+	// M5 (Partial Rendering): drop any deferred clears still pending for this texture; its
+	// post-clear contents are unobservable once it is gone. Keyed by base LatteTexture*.
+	m_mtlr->NotifyLatteTextureDeleted(this);
+
 	m_texture->release();
 }
 

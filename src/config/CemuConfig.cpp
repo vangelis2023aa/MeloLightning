@@ -305,6 +305,7 @@ XMLConfigParser CemuConfig::Load(XMLConfigParser& parser)
 	experimental_texture_view_fast_path = experimental.get("TextureViewFastPath", false);
 	experimental_decode_cache = experimental.get("DecodeCache", false);
 	experimental_worker_texture_decode = experimental.get("WorkerTextureDecode", false);
+	experimental_partial_rendering = experimental.get("PartialRendering", false);
 	experimental_audio_buffer_blocks = experimental.get("AudioBufferBlocks", 0);
 	experimental_audio_anti_clip = experimental.get("AudioAntiClip", 0);
 	experimental_metalfx_enable = experimental.get("MetalFXEnable", false);
@@ -503,6 +504,7 @@ XMLConfigParser CemuConfig::Save(XMLConfigParser& parser)
 	experimental.set("TextureViewFastPath", experimental_texture_view_fast_path.GetValue());
 	experimental.set("DecodeCache", experimental_decode_cache.GetValue());
 	experimental.set("WorkerTextureDecode", experimental_worker_texture_decode.GetValue());
+	experimental.set("PartialRendering", experimental_partial_rendering.GetValue());
 	experimental.set("AudioBufferBlocks", experimental_audio_buffer_blocks.GetValue());
 	experimental.set("AudioAntiClip", experimental_audio_anti_clip.GetValue());
 	experimental.set("MetalFXEnable", experimental_metalfx_enable.GetValue());

@@ -139,6 +139,7 @@ public:
 	[[nodiscard]] static bool ExperimentalTextureViewFastPath();
 	[[nodiscard]] static bool ExperimentalDecodeCache();
 	[[nodiscard]] static bool ExperimentalWorkerTextureDecode();
+	[[nodiscard]] static bool ExperimentalPartialRendering();
 
 	// Experimental MetalFX spatial upscaling (Metal/iOS). Read once by MetalRenderer at construction
 	// and latched; see CemuConfig experimental_metalfx_* flags.

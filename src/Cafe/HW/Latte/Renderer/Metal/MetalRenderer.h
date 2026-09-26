@@ -400,6 +400,24 @@ public:
 	void DeclareResidency(MTL::RenderCommandEncoder* enc, const MTL::Resource* resource, MTL::ResourceUsage usage, MTL::RenderStages stage);
 
     void ClearColorTextureInternal(MTL::Texture* mtlTexture, sint32 sliceIndex, sint32 mipIndex, float r, float g, float b, float a);
+    // Immediate depth/stencil clear, extracted from texture_clearDepthSlice so the deferred-clear flush
+    // path can emit one too. clearStencil must already be format-gated by the caller.
+    void ClearDepthTextureInternal(MTL::Texture* mtlTexture, uint32 sliceIndex, sint32 mipIndex, bool clearDepth, bool clearStencil, float depthValue, uint32 stencilValue);
+
+    // Experimental "Partial Rendering" helpers (see m_pendingClears). EmitPendingClearNow materializes one
+    // recorded clear as an immediate standalone pass, re-deriving the base MTL texture from the still-live
+    // LatteTexture. FlushPendingClears drains every recorded clear that way; it is called at each encoder
+    // funnel that is not the fold site, so no recorded clear can be bypassed by non-draw GPU work. Both are
+    // cheap no-ops when the list is empty (the toggle-OFF case). NotifyLatteTextureDeleted drops records for
+    // a base texture that is being destroyed.
+    void EmitPendingClearNow(const PendingClear& rec);
+    void FlushPendingClears();
+    void NotifyLatteTextureDeleted(class LatteTexture* tex);
+    // Returns the record slot for (tex, slice, mip, isDepth), reusing an existing un-consumed record for the
+    // same key (so consecutive clears of the same subresource collapse to the last one, matching the non-
+    // deferred path where the later clear overwrites the earlier) or appending a fresh one. The caller fills
+    // in the colour or depth/stencil fields on the returned reference.
+    PendingClear& RecordPendingClear(class LatteTexture* tex, sint32 slice, sint32 mip, bool isDepth);
 
     void CopyBufferToBuffer(MTL::Buffer* src, uint32 srcOffset, MTL::Buffer* dst, uint32 dstOffset, uint32 size, MTL::RenderStages after, MTL::RenderStages before);
 
@@ -617,6 +635,38 @@ private:
 
 	// Bumped at the start of every draw sequence; see GetDrawPassGeneration(). GPU-thread only.
 	uint32 m_drawPassGeneration = 1;
+
+	// Experimental "Partial Rendering" (experimental_partial_rendering): a guest render-target clear is
+	// recorded here instead of being emitted as its own render pass, then folded into the next draw pass
+	// that targets the same subresource as a load-action=Clear (so the standalone clear's store and the
+	// draw pass' load are both skipped - a TBDR tile-memory bandwidth win). A recorded clear is keyed at
+	// the Latte level (base LatteTexture* + slice + mip) because the clear addresses the base texture
+	// while an FBO attachment addresses a texture *view* of it, so the underlying MTL::Texture pointers
+	// differ and only the Latte identity matches reliably. Any clear that cannot be folded (no matching
+	// current attachment, a non-plain-2D target, a stencil aspect with no stencil attachment, or a non-
+	// draw consumer such as present / blit / compute / readback) is emitted immediately and unchanged via
+	// the *Internal helpers, so the visible result is always identical to the non-deferred path. Recording
+	// a clear also ends any open encoder (exactly as the immediate clear would have), so whenever this list
+	// is non-empty no render encoder is live - which is why the encoder-reuse fast path never has to
+	// consider pending clears. The list is only ever populated on the GPU thread while the toggle is ON;
+	// with it OFF nothing is recorded and every consult below is a single empty() test. Records are dropped
+	// (never materialized) when their base texture is destroyed - see NotifyLatteTextureDeleted - because a
+	// clear that no draw ever consumed, on a texture that is going away, is unobservable.
+	struct PendingClear
+	{
+		class LatteTexture* latteTexture; // base texture identity: matched against an FBO attachment view's baseTexture, and against the delete hook
+		sint32 sliceIndex;
+		sint32 mipIndex;
+		bool isDepth;                     // false => color record (uses r,g,b,a); true => depth/stencil record
+		// color
+		float r, g, b, a;
+		// depth / stencil (clearStencil is already format-gated at record time)
+		bool clearDepth;
+		bool clearStencil;
+		float depthValue;
+		uint32 stencilValue;
+	};
+	std::vector<PendingClear> m_pendingClears;
 
 	// Experimental MetalFX spatial upscaling. All state is latched once at renderer construction from
 	// config (in the settings-plumbing commit) and never re-read afterwards, so a per-frame present is

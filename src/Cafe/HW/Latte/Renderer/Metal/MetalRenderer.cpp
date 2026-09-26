@@ -683,6 +683,11 @@ void MetalRenderer::DrawBackbufferQuad(LatteTextureView* texView, RendererOutput
     if (!AcquireDrawable(!padView))
         return;
 
+    // M5: MetalFX (below) encodes directly on the command buffer, bypassing the encoder
+    // funnels that would otherwise materialize deferred clears, and the present source may
+    // itself be a pending-clear target. Flush here so nothing reads stale contents.
+    FlushPendingClears();
+
     MTL::Texture* presentTexture = static_cast<LatteTextureViewMtl*>(texView)->GetRGBAView();
 
     // Experimental MetalFX spatial upscale (main window only). Dormant unless the feature is latched
@@ -1154,6 +1159,18 @@ void MetalRenderer::texture_clearColorSlice(LatteTexture* hostTexture, sint32 sl
         return;
     }
 
+    // Experimental "Partial Rendering": defer this clear and fold it into the next draw pass to the same
+    // target (see m_pendingClears). Recording ends any open encoder, exactly as the immediate clear below
+    // would have, so guest ordering (a clear breaks the current render pass) is preserved.
+    if (ActiveSettings::ExperimentalPartialRendering())
+    {
+        if (m_commandEncoder)
+            EndEncoding();
+        PendingClear& rec = RecordPendingClear(hostTexture, sliceIndex, mipIndex, false);
+        rec.r = r; rec.g = g; rec.b = b; rec.a = a;
+        return;
+    }
+
     auto mtlTexture = static_cast<LatteTextureMtl*>(hostTexture)->GetTexture();
 
     ClearColorTextureInternal(mtlTexture, sliceIndex, mipIndex, r, g, b, a);
@@ -1168,35 +1185,22 @@ void MetalRenderer::texture_clearDepthSlice(LatteTexture* hostTexture, uint32 sl
         return;
     }
 
+    // Experimental "Partial Rendering": defer this clear (see m_pendingClears). clearStencil is stored
+    // already format-gated so the flush/fold path never has to re-check it.
+    if (ActiveSettings::ExperimentalPartialRendering())
+    {
+        if (m_commandEncoder)
+            EndEncoding();
+        PendingClear& rec = RecordPendingClear(hostTexture, (sint32)sliceIndex, mipIndex, true);
+        rec.clearDepth = clearDepth;
+        rec.clearStencil = clearStencil;
+        rec.depthValue = depthValue;
+        rec.stencilValue = stencilValue;
+        return;
+    }
+
     auto mtlTexture = static_cast<LatteTextureMtl*>(hostTexture)->GetTexture();
-
-    NS_STACK_SCOPED MTL::RenderPassDescriptor* renderPassDescriptor = MTL::RenderPassDescriptor::alloc()->init();
-    if (clearDepth)
-    {
-        auto depthAttachment = renderPassDescriptor->depthAttachment();
-        depthAttachment->setTexture(mtlTexture);
-        depthAttachment->setClearDepth(depthValue);
-        depthAttachment->setLoadAction(MTL::LoadActionClear);
-        depthAttachment->setStoreAction(MTL::StoreActionStore);
-        depthAttachment->setSlice(sliceIndex);
-        depthAttachment->setLevel(mipIndex);
-    }
-    if (clearStencil)
-    {
-        auto stencilAttachment = renderPassDescriptor->stencilAttachment();
-        stencilAttachment->setTexture(mtlTexture);
-        stencilAttachment->setClearStencil(stencilValue);
-        stencilAttachment->setLoadAction(MTL::LoadActionClear);
-        stencilAttachment->setStoreAction(MTL::StoreActionStore);
-        stencilAttachment->setSlice(sliceIndex);
-        stencilAttachment->setLevel(mipIndex);
-    }
-
-    GetTemporaryRenderCommandEncoder(renderPassDescriptor);
-    EndEncoding();
-
-    // Debug
-    m_performanceMonitor.m_clears++;
+    ClearDepthTextureInternal(mtlTexture, sliceIndex, mipIndex, clearDepth, clearStencil, depthValue, stencilValue);
 }
 
 LatteTexture* MetalRenderer::texture_createTextureEx(Latte::E_DIM dim, MPTR physAddress, MPTR physMipAddress, Latte::E_GX2SURFFMT format, uint32 width, uint32 height, uint32 depth, uint32 pitch, uint32 mipLevels, uint32 swizzle, Latte::E_HWTILEMODE tileMode, bool isDepth, bool isRenderTarget)
@@ -2488,6 +2492,10 @@ MTL::CommandBuffer* MetalRenderer::GetCommandBuffer()
 
 MTL::RenderCommandEncoder* MetalRenderer::GetTemporaryRenderCommandEncoder(MTL::RenderPassDescriptor* renderPassDescriptor)
 {
+    // M5: a temporary render pass is a GPU op; materialize any deferred clears first so
+    // guest order is preserved (this encoder is never a fold target).
+    FlushPendingClears();
+
     EndEncoding();
 
     auto commandBuffer = GetCommandBuffer();
@@ -2557,9 +2565,96 @@ MTL::RenderCommandEncoder* MetalRenderer::GetRenderCommandEncoder(bool forceRecr
 
     auto commandBuffer = GetCommandBuffer();
 
+    // M5 (Partial Rendering): fold any deferred guest clears into this render pass'
+    // load actions (TBDR: skips the standalone clear pass' store + this pass' load).
+    // Reachable only on the new-encoder path: deferral ends any open encoder, so the
+    // reuse fast path above is never taken while clears are pending. Records that
+    // cannot be folded atomically fall back to a standalone immediate clear.
+    std::vector<uint32> m5FoldedColor;
+    bool m5FoldedDepth = false;
+    bool m5FoldedStencil = false;
+    if (!m_pendingClears.empty())
+    {
+        std::vector<PendingClear> pending;
+        pending.swap(m_pendingClears);
+        auto* fbo = m_state.m_activeFBO.m_fbo;
+        auto* desc = fbo->GetRenderPassDescriptor();
+        for (const auto& rec : pending)
+        {
+            bool folded = false;
+            if (!rec.isDepth)
+            {
+                for (uint32 i = 0; i < 8; i++)
+                {
+                    LatteTextureView* view = fbo->colorBuffer[i].texture;
+                    if (view && view->baseTexture == rec.latteTexture &&
+                        view->firstMip == rec.mipIndex && view->numMip == 1 &&
+                        view->firstSlice == rec.sliceIndex && view->numSlice == 1 &&
+                        view->dim == Latte::E_DIM::DIM_2D)
+                    {
+                        auto att = desc->colorAttachments()->object(i);
+                        att->setClearColor(MTL::ClearColor(rec.r, rec.g, rec.b, rec.a));
+                        att->setLoadAction(MTL::LoadActionClear);
+                        m5FoldedColor.push_back(i);
+                        folded = true;
+                        break;
+                    }
+                }
+            }
+            // __M5_DEPTH_FOLD__
+            else
+            {
+                LatteTextureView* dview = fbo->depthBuffer.texture;
+                bool depthMatches = dview && dview->baseTexture == rec.latteTexture &&
+                    dview->firstMip == rec.mipIndex && dview->numMip == 1 &&
+                    dview->firstSlice == rec.sliceIndex && dview->numSlice == 1 &&
+                    dview->dim == Latte::E_DIM::DIM_2D;
+                // The descriptor only carries a stencil attachment when the FBO's depth
+                // buffer actually has stencil; without one a stencil clear can't be folded.
+                bool hasStencilAtt = (desc->stencilAttachment()->texture() != nullptr);
+                // Fold the record only if it can be folded in full (atomic): depth
+                // attachment present, and, if it clears stencil, a stencil attachment too.
+                if (depthMatches && (!rec.clearStencil || hasStencilAtt))
+                {
+                    if (rec.clearDepth)
+                    {
+                        auto att = desc->depthAttachment();
+                        att->setClearDepth(rec.depthValue);
+                        att->setLoadAction(MTL::LoadActionClear);
+                        m5FoldedDepth = true;
+                    }
+                    if (rec.clearStencil)
+                    {
+                        auto att = desc->stencilAttachment();
+                        att->setClearStencil(rec.stencilValue);
+                        att->setLoadAction(MTL::LoadActionClear);
+                        m5FoldedStencil = true;
+                    }
+                    folded = true;
+                }
+            }
+            if (!folded)
+                EmitPendingClearNow(rec);
+        }
+    }
+
     auto pool = NS::AutoreleasePool::alloc()->init();
     auto renderCommandEncoder = commandBuffer->renderCommandEncoder(m_state.m_activeFBO.m_fbo->GetRenderPassDescriptor())->retain();
     pool->release();
+
+    // M5: the descriptor's load-action state was captured at encoder creation above, so
+    // restore the folded attachments to LoadActionLoad now (the descriptor is persistent
+    // and shared across passes; a stale Clear would wrongly re-clear on the next pass).
+    if (!m5FoldedColor.empty() || m5FoldedDepth || m5FoldedStencil)
+    {
+        auto* desc = m_state.m_activeFBO.m_fbo->GetRenderPassDescriptor();
+        for (uint32 i : m5FoldedColor)
+            desc->colorAttachments()->object(i)->setLoadAction(MTL::LoadActionLoad);
+        if (m5FoldedDepth)
+            desc->depthAttachment()->setLoadAction(MTL::LoadActionLoad);
+        if (m5FoldedStencil)
+            desc->stencilAttachment()->setLoadAction(MTL::LoadActionLoad);
+    }
 #ifdef CEMU_DEBUG_ASSERT
     renderCommandEncoder->setLabel(GetLabel("Render command encoder", renderCommandEncoder));
 #endif
@@ -2580,6 +2675,9 @@ MTL::RenderCommandEncoder* MetalRenderer::GetRenderCommandEncoder(bool forceRecr
 
 MTL::ComputeCommandEncoder* MetalRenderer::GetComputeCommandEncoder()
 {
+    // M5: compute is not a fold target; materialize deferred clears first (guest order).
+    FlushPendingClears();
+
     if (m_commandEncoder)
     {
         if (m_encoderType == MetalEncoderType::Compute)
@@ -2605,6 +2703,9 @@ MTL::ComputeCommandEncoder* MetalRenderer::GetComputeCommandEncoder()
 
 MTL::BlitCommandEncoder* MetalRenderer::GetBlitCommandEncoder()
 {
+    // M5: blit is not a fold target; materialize deferred clears first (guest order).
+    FlushPendingClears();
+
     if (m_commandEncoder)
     {
         if (m_encoderType == MetalEncoderType::Blit)
@@ -2655,6 +2756,12 @@ void MetalRenderer::CommitCommandBuffer()
 {
     if (!m_currentCommandBuffer.m_commandBuffer)
         return;
+
+    // M5: defensively materialize any deferred clears before committing so they cannot
+    // linger past a command-buffer boundary in a way that reorders them relative to this
+    // buffer's other work. Safe against re-entry: FlushPendingClears swaps the list out
+    // first, so the commit it may trigger internally sees an empty list.
+    FlushPendingClears();
 
     EndEncoding();
 
@@ -3268,6 +3375,86 @@ void MetalRenderer::ClearColorTextureInternal(MTL::Texture* mtlTexture, sint32 s
 
     // Debug
     m_performanceMonitor.m_clears++;
+}
+
+void MetalRenderer::ClearDepthTextureInternal(MTL::Texture* mtlTexture, uint32 sliceIndex, sint32 mipIndex, bool clearDepth, bool clearStencil, float depthValue, uint32 stencilValue)
+{
+    NS_STACK_SCOPED MTL::RenderPassDescriptor* renderPassDescriptor = MTL::RenderPassDescriptor::alloc()->init();
+    if (clearDepth)
+    {
+        auto depthAttachment = renderPassDescriptor->depthAttachment();
+        depthAttachment->setTexture(mtlTexture);
+        depthAttachment->setClearDepth(depthValue);
+        depthAttachment->setLoadAction(MTL::LoadActionClear);
+        depthAttachment->setStoreAction(MTL::StoreActionStore);
+        depthAttachment->setSlice(sliceIndex);
+        depthAttachment->setLevel(mipIndex);
+    }
+    if (clearStencil)
+    {
+        auto stencilAttachment = renderPassDescriptor->stencilAttachment();
+        stencilAttachment->setTexture(mtlTexture);
+        stencilAttachment->setClearStencil(stencilValue);
+        stencilAttachment->setLoadAction(MTL::LoadActionClear);
+        stencilAttachment->setStoreAction(MTL::StoreActionStore);
+        stencilAttachment->setSlice(sliceIndex);
+        stencilAttachment->setLevel(mipIndex);
+    }
+
+    GetTemporaryRenderCommandEncoder(renderPassDescriptor);
+    EndEncoding();
+
+    // Debug
+    m_performanceMonitor.m_clears++;
+}
+
+MetalRenderer::PendingClear& MetalRenderer::RecordPendingClear(LatteTexture* tex, sint32 slice, sint32 mip, bool isDepth)
+{
+    for (auto& rec : m_pendingClears)
+    {
+        if (rec.latteTexture == tex && rec.sliceIndex == slice && rec.mipIndex == mip && rec.isDepth == isDepth)
+            return rec;
+    }
+    m_pendingClears.push_back({});
+    PendingClear& rec = m_pendingClears.back();
+    rec.latteTexture = tex;
+    rec.sliceIndex = slice;
+    rec.mipIndex = mip;
+    rec.isDepth = isDepth;
+    return rec;
+}
+
+void MetalRenderer::EmitPendingClearNow(const PendingClear& rec)
+{
+    MTL::Texture* mtlTexture = static_cast<LatteTextureMtl*>(rec.latteTexture)->GetTexture();
+    if (rec.isDepth)
+        ClearDepthTextureInternal(mtlTexture, rec.sliceIndex, rec.mipIndex, rec.clearDepth, rec.clearStencil, rec.depthValue, rec.stencilValue);
+    else
+        ClearColorTextureInternal(mtlTexture, rec.sliceIndex, rec.mipIndex, rec.r, rec.g, rec.b, rec.a);
+}
+
+void MetalRenderer::FlushPendingClears()
+{
+    if (m_pendingClears.empty())
+        return;
+
+    // Swap out first so any re-entrant flush (an internal EndEncoding -> opportunistic
+    // CommitCommandBuffer -> FlushPendingClears) sees an empty list and returns.
+    std::vector<PendingClear> pending;
+    pending.swap(m_pendingClears);
+    for (const auto& rec : pending)
+        EmitPendingClearNow(rec);
+}
+
+void MetalRenderer::NotifyLatteTextureDeleted(LatteTexture* tex)
+{
+    if (m_pendingClears.empty())
+        return;
+
+    // Drop (do not materialize) pending clears for a texture being destroyed:
+    // its post-clear contents are unobservable once the texture is gone.
+    m_pendingClears.erase(std::remove_if(m_pendingClears.begin(), m_pendingClears.end(),
+        [tex](const PendingClear& rec) { return rec.latteTexture == tex; }), m_pendingClears.end());
 }
 
 void MetalRenderer::CopyBufferToBuffer(MTL::Buffer* src, uint32 srcOffset, MTL::Buffer* dst, uint32 dstOffset, uint32 size, MTL::RenderStages after, MTL::RenderStages before)

@@ -390,6 +390,13 @@ struct SettingsView: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Toggle("Fold Screen Clears Into Drawing", isOn: configManager.experimentalPartialRendering)
+                            Text("When a game wipes a render target to a solid color before drawing over it, the emulator normally does that wipe as its own pass — writing the whole surface to memory, then reading it all back for the drawing that follows. On Apple GPUs that round-trip is wasted memory bandwidth. This waits and performs the wipe as the drawing pass begins instead, so the clear costs nothing extra. If the very next thing drawn covers the same target it folds in cleanly; anything else falls back to a normal clear, so the picture is the same. Saves GPU memory traffic, which helps most when the game is GPU-bound and can lower heat. If you see stray flashes or wrong background colors, turn it off.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                     }
                 } header: {
