@@ -410,6 +410,9 @@ public:
     // funnel that is not the fold site, so no recorded clear can be bypassed by non-draw GPU work. Both are
     // cheap no-ops when the list is empty (the toggle-OFF case). NotifyLatteTextureDeleted drops records for
     // a base texture that is being destroyed.
+private:
+    struct PendingClear; // defined below (also private); forward-declared so the following member decls can reference it
+public:
     void EmitPendingClearNow(const PendingClear& rec);
     void FlushPendingClears();
     void NotifyLatteTextureDeleted(class LatteTexture* tex);
