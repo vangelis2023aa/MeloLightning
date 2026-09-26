@@ -227,6 +227,15 @@ class ConfigManager: ObservableObject {
         }
     }
 
+    var experimentalMetalFXDirectInput: Binding<Bool> {
+        Binding {
+            self.config.experimentalMetalFXDirectInput
+        } set: {
+            self.config.experimentalMetalFXDirectInput = $0
+            self.objectWillChange.send()
+        }
+    }
+
     var renderUpsideDown: Binding<Bool> {
         Binding {
             self.config.renderUpsideDown

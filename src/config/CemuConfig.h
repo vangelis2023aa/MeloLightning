@@ -577,6 +577,14 @@ struct CemuConfig
 	// Ignored unless MetalFX scaling is active.
 	ConfigValue<bool>   experimental_metalfx_selective_scaling{ false };
 
+	// Experimental MetalFX "Direct Input" (Metal only). false (default) = the reduced-resolution present
+	// source is copied into the scaler's own input texture each frame before upscaling (original behavior).
+	// true = when the present source already carries every texture-usage flag MetalFX requires of its
+	// color input, bind it directly and skip that per-frame copy (saves tile-memory bandwidth/heat); any
+	// source that does not satisfy the usage flags transparently falls back to the copy path. Ignored
+	// unless MetalFX scaling is active.
+	ConfigValue<bool>   experimental_metalfx_direct_input{ false };
+
 	XMLConfigParser Load(XMLConfigParser& parser);
 	XMLConfigParser Save(XMLConfigParser& parser);
 

@@ -396,6 +396,13 @@ struct SettingsView: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Toggle("Direct Input (skip upscaler copy)", isOn: configManager.experimentalMetalFXDirectInput)
+                            Text("Experimental. Feed the reduced-resolution frame straight into MetalFX instead of copying it into the upscaler's own buffer first, saving a per-frame copy. Frames that are not compatible fall back to the copy automatically. Only used while MetalFX is enabled. Leave off if you notice any flicker or visual glitches while upscaling.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     } header: {
                         Text("Experimental Graphics")
                     } footer: {

@@ -172,6 +172,11 @@ bool ActiveSettings::ExperimentalMetalFXSelectiveScaling()
 	return GetConfig().experimental_metalfx_selective_scaling;
 }
 
+bool ActiveSettings::ExperimentalMetalFXDirectInput()
+{
+	return GetConfig().experimental_metalfx_direct_input;
+}
+
 GraphicAPI ActiveSettings::GetGraphicsAPI()
 {
 	const GraphicAPI api = g_current_game_profile->GetGraphicsAPI().value_or(GetConfig().graphic_api);

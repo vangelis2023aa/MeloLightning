@@ -356,6 +356,11 @@ MetalRenderer::MetalRenderer()
     // here alongside the scale percent and reset to false in the destructor. When MetalFX is inactive the
     // scale percent is 0 so this flag has no effect regardless of its value.
     LatteTexture_setMetalFXSelectiveScaling(m_metalFXActive && ActiveSettings::ExperimentalMetalFXSelectiveScaling());
+
+    // Experimental MetalFX "Direct Input": only meaningful while MetalFX scaling is active. Latched here
+    // so it cannot flip mid-session; TryApplyMetalFX() reads only this member. When MetalFX is inactive
+    // the scaler is never allocated so this flag has no effect regardless of its value.
+    m_metalFXDirectInput = m_metalFXActive && ActiveSettings::ExperimentalMetalFXDirectInput();
 }
 
 MetalRenderer::~MetalRenderer()
@@ -630,6 +635,27 @@ MTL::Texture* MetalRenderer::TryApplyMetalFX(MTL::Texture* sourceTexture, sint32
     MTL::Texture* outputTexture = m_metalFXUpscaler->GetOutputTexture();
     if (!inputTexture || !outputTexture)
         return sourceTexture;
+
+    // Experimental "Direct Input": bind the reduced-resolution present source directly as the scaler's
+    // color input and skip the per-frame copy into the owned input texture, saving that copy's
+    // tile-memory bandwidth. Only taken when the source already carries every usage flag MetalFX
+    // requires of its color texture (the scanout is created +sampled as a render target, so it normally
+    // does). Everything is still recorded onto the SAME command buffer, so default hazard tracking keeps
+    // produce -> scale -> sample ordered without an explicit fence.
+    if (m_metalFXDirectInput)
+    {
+        const MTL::TextureUsage requiredUsage = m_metalFXUpscaler->GetRequiredColorTextureUsage();
+        if (requiredUsage != MTL::TextureUsageUnknown && (sourceTexture->usage() & requiredUsage) == requiredUsage)
+        {
+            m_metalFXUpscaler->SetColorTexture(sourceTexture);
+            EndEncoding(); // MetalFX must encode with no open encoder
+            m_metalFXUpscaler->Encode(GetCommandBuffer());
+            return outputTexture;
+        }
+        // Source cannot be bound directly: fall through to the copy path, first restoring the owned input
+        // texture as the scaler's color input in case a previous frame bound an external one.
+        m_metalFXUpscaler->SetColorTexture(inputTexture);
+    }
 
     // Copy the reduced-resolution present source into the scaler's owned input texture, then let
     // MetalFX encode its own pass producing the full-resolution output. All three textures are tracked

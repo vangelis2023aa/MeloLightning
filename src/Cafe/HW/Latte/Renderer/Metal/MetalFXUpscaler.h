@@ -42,6 +42,18 @@ public:
 	MTL::Texture* GetInputTexture() const { return m_inputTexture; }
 	MTL::Texture* GetOutputTexture() const { return m_outputTexture; }
 
+	// Usage flags MetalFX requires of whatever texture is bound as the scaler's color (input) texture.
+	// Valid after a successful Configure() (0 before). A caller that wants to bind its own source texture
+	// directly via SetColorTexture() (skipping the copy into GetInputTexture()) must first confirm that
+	// (sourceTexture->usage() & GetRequiredColorTextureUsage()) == GetRequiredColorTextureUsage().
+	MTL::TextureUsage GetRequiredColorTextureUsage() const { return m_colorTextureUsage; }
+
+	// Rebind the scaler's color (input) texture for the next Encode(). Pass an external source texture
+	// that satisfies GetRequiredColorTextureUsage() and matches the configured input geometry/format to
+	// skip the copy into the owned input texture, or pass GetInputTexture() to restore the copy path.
+	// No-op if not ready. The owned input/output textures are unaffected.
+	void SetColorTexture(MTL::Texture* texture);
+
 	uint32 GetOutputWidth() const { return m_outputWidth; }
 	uint32 GetOutputHeight() const { return m_outputHeight; }
 
@@ -67,4 +79,8 @@ private:
 	uint32 m_outputHeight = 0;
 	MTL::PixelFormat m_colorFormat = MTL::PixelFormatInvalid;
 	sint32 m_colorProcessingMode = -1;
+
+	// Usage flags the current scaler requires of its color texture (queried in Configure). 0 until the
+	// scaler has been created, so the direct-input usage check fails closed and falls back to the copy.
+	MTL::TextureUsage m_colorTextureUsage = MTL::TextureUsageUnknown;
 };

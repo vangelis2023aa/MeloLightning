@@ -627,6 +627,11 @@ private:
 	bool m_metalFXActive = false;         // master latch: false => present path unchanged
 	sint32 m_metalFXRenderScale = 100;    // internal-resolution percentage (100 == native, no scaling)
 
+	// Experimental "Direct Input": bind the reduced-resolution present source straight into the scaler
+	// as its color input (skipping the per-frame copy into the scaler's owned input texture) whenever the
+	// source's usage flags satisfy MetalFX. Latched at construction; false => the copy path is unchanged.
+	bool m_metalFXDirectInput = false;
+
 	// State
 	MetalState m_state;
 

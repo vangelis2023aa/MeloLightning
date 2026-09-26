@@ -189,6 +189,9 @@ static CPUMode toCPUMode(ObjCCPUMode mode) {
 - (BOOL)experimentalMetalFXSelectiveScaling { return GetConfig().experimental_metalfx_selective_scaling.GetValue(); }
 - (void)setExperimentalMetalFXSelectiveScaling:(BOOL)v { GetConfig().experimental_metalfx_selective_scaling = v; autoSave(); }
 
+- (BOOL)experimentalMetalFXDirectInput { return GetConfig().experimental_metalfx_direct_input.GetValue(); }
+- (void)setExperimentalMetalFXDirectInput:(BOOL)v { GetConfig().experimental_metalfx_direct_input = v; autoSave(); }
+
 - (BOOL)renderUpsideDown                   { return GetConfig().render_upside_down.GetValue(); }
 - (void)setRenderUpsideDown:(BOOL)v        { GetConfig().render_upside_down = v; autoSave(); }
 

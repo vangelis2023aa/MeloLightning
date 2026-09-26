@@ -102,6 +102,10 @@ bool MetalFXSpatialUpscaler::Configure(uint32 inputWidth, uint32 inputHeight, ui
 		m_inputTexture = makeTexture(inputWidth, inputHeight, m_scaler->colorTextureUsage());
 		m_outputTexture = makeTexture(outputWidth, outputHeight, m_scaler->outputTextureUsage());
 
+		// Remember the color-input usage requirement so a caller can decide whether an external source
+		// texture may be bound directly (see SetColorTexture / GetRequiredColorTextureUsage).
+		m_colorTextureUsage = m_scaler->colorTextureUsage();
+
 		if (!m_inputTexture || !m_outputTexture)
 		{
 			ReleaseScaler();
@@ -134,6 +138,15 @@ void MetalFXSpatialUpscaler::Encode(MTL::CommandBuffer* commandBuffer)
 		m_scaler->encodeToCommandBuffer(commandBuffer);
 }
 
+void MetalFXSpatialUpscaler::SetColorTexture(MTL::Texture* texture)
+{
+	if (!m_scaler || !texture)
+		return;
+
+	if (__builtin_available(iOS 16.0, macOS 13.0, *))
+		m_scaler->setColorTexture(texture);
+}
+
 void MetalFXSpatialUpscaler::ReleaseTextures()
 {
 	if (m_inputTexture)
@@ -155,4 +168,5 @@ void MetalFXSpatialUpscaler::ReleaseScaler()
 		m_scaler->release();
 		m_scaler = nullptr;
 	}
+	m_colorTextureUsage = MTL::TextureUsageUnknown;
 }
