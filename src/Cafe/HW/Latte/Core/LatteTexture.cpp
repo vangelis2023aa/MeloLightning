@@ -44,6 +44,27 @@ sint32 LatteTexture_getMetalFXRenderScalePercent()
 	return s_metalFXRenderScalePercent.load(std::memory_order_relaxed);
 }
 
+// Experimental MetalFX "Selective Render Scaling". When enabled, only render targets large enough to be
+// main scene/effect buffers (>= kSelectiveScaleMinArea pixels) are shrunk by the MetalFX scale percent;
+// smaller render targets (UI, effect, intermediate/compositing buffers) are kept at native resolution.
+// The predicate is deliberately AREA-ONLY: a framebuffer's color and depth attachments always share
+// their spatial dimensions, so an area threshold classifies every attachment of a given framebuffer
+// identically and can never leave a framebuffer with mismatched (scaled color / native depth) sizes.
+// Aliasing/inherited scaling (s_metalFXInheritScalePercentForNextCreate) is NOT gated by this, so the
+// alias-sync rescale-ratio guarantee is preserved. false (default) = scale every render target.
+static constexpr sint64 kSelectiveScaleMinArea = 256 * 256;
+static std::atomic_bool s_metalFXSelectiveScaling{ false };
+
+void LatteTexture_setMetalFXSelectiveScaling(bool enabled)
+{
+	s_metalFXSelectiveScaling.store(enabled, std::memory_order_relaxed);
+}
+
+bool LatteTexture_getMetalFXSelectiveScaling()
+{
+	return s_metalFXSelectiveScaling.load(std::memory_order_relaxed);
+}
+
 // Experimental MetalFX: scale-ratio inheritance hint. When a new texture is created over guest
 // memory that already backs a MetalFX-scaled texture (e.g. a VIEW_NOT_COMPATIBLE reinterpretation
 // or a CopySurface destination that is not itself a render target), it must adopt the SAME effective
@@ -1404,7 +1425,15 @@ LatteTexture::LatteTexture(Latte::E_DIM dim, MPTR physAddress, MPTR physMipAddre
 		if (s_metalFXInheritScalePercentForNextCreate > 0)
 			scalePercent = s_metalFXInheritScalePercentForNextCreate; // alias of an already-scaled texture
 		else if (isRenderTarget)
-			scalePercent = LatteTexture_getMetalFXRenderScalePercent();
+		{
+			// Selective Render Scaling (experimental): when enabled, only scale render targets large
+			// enough to be main scene/effect buffers; keep small targets (UI/intermediate) native. The
+			// test is area-only so a framebuffer's color and depth attachments (identical dimensions)
+			// are always classified the same way. When disabled, every render target is scaled.
+			if (!s_metalFXSelectiveScaling.load(std::memory_order_relaxed) ||
+				(sint64)width * (sint64)height >= kSelectiveScaleMinArea)
+				scalePercent = LatteTexture_getMetalFXRenderScalePercent();
+		}
 		if (scalePercent > 0 && scalePercent < 100)
 		{
 			sint32 scaledWidth = (sint32)(((sint64)width * scalePercent + 50) / 100);

@@ -568,6 +568,14 @@ struct CemuConfig
 	ConfigValue<sint32> experimental_metalfx_render_scale{ 67 };
 	ConfigValue<sint32> experimental_metalfx_mode{ 0 };
 
+	// Experimental MetalFX "Selective Render Scaling" (Metal only). false (default) = when MetalFX is
+	// active, every render target is scaled by the internal-resolution percent (original behavior). true
+	// = only render targets large enough to be main scene/effect buffers are scaled; small targets
+	// (UI/intermediate/compositing) stay at native resolution for sharper 2D and less alias-sync churn.
+	// Purely area-based, so a framebuffer's color and depth attachments are always classified together.
+	// Ignored unless MetalFX scaling is active.
+	ConfigValue<bool>   experimental_metalfx_selective_scaling{ false };
+
 	XMLConfigParser Load(XMLConfigParser& parser);
 	XMLConfigParser Save(XMLConfigParser& parser);
 

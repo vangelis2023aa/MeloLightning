@@ -209,6 +209,15 @@ class ConfigManager: ObservableObject {
         }
     }
 
+    var experimentalMetalFXSelectiveScaling: Binding<Bool> {
+        Binding {
+            self.config.experimentalMetalFXSelectiveScaling
+        } set: {
+            self.config.experimentalMetalFXSelectiveScaling = $0
+            self.objectWillChange.send()
+        }
+    }
+
     var renderUpsideDown: Binding<Bool> {
         Binding {
             self.config.renderUpsideDown

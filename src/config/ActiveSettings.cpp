@@ -162,6 +162,11 @@ sint32 ActiveSettings::ExperimentalMetalFXMode()
 	return GetConfig().experimental_metalfx_mode.GetValue();
 }
 
+bool ActiveSettings::ExperimentalMetalFXSelectiveScaling()
+{
+	return GetConfig().experimental_metalfx_selective_scaling;
+}
+
 GraphicAPI ActiveSettings::GetGraphicsAPI()
 {
 	const GraphicAPI api = g_current_game_profile->GetGraphicsAPI().value_or(GetConfig().graphic_api);

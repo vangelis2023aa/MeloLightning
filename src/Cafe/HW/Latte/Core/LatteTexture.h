@@ -349,6 +349,14 @@ uint64 LatteTexture_getNextUpdateEventCounter();
 void LatteTexture_setMetalFXRenderScalePercent(sint32 percent);
 sint32 LatteTexture_getMetalFXRenderScalePercent();
 
+// Experimental MetalFX "Selective Render Scaling". false (default) = every render target is scaled by
+// the MetalFX percent (original behavior). true = only render targets large enough to be main
+// scene/effect buffers are scaled; small targets (UI/intermediate) stay at native resolution. Only has
+// an effect while MetalFX scaling is active (percent in (0,100)). Set once by the Metal renderer at
+// construction and reset at destruction.
+void LatteTexture_setMetalFXSelectiveScaling(bool enabled);
+bool LatteTexture_getMetalFXSelectiveScaling();
+
 void LatteTexture_UpdateCacheFromDynamicTextures(LatteTexture* texture);
 void LatteTexture_MarkConnectedTexturesForReloadFromDynamicTextures(LatteTexture* texture);
 void LatteTexture_TrackTextureGPUWrite(LatteTexture* texture, uint32 slice, uint32 mip, uint64 eventCounter);

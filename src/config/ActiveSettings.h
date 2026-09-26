@@ -138,6 +138,7 @@ public:
 	[[nodiscard]] static bool   ExperimentalMetalFXEnable();
 	[[nodiscard]] static sint32 ExperimentalMetalFXRenderScale();
 	[[nodiscard]] static sint32 ExperimentalMetalFXMode();
+	[[nodiscard]] static bool   ExperimentalMetalFXSelectiveScaling();
 
 private:
 	inline static bool s_setPathsCalled = false;

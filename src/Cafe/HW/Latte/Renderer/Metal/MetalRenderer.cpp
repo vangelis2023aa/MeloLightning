@@ -350,6 +350,12 @@ MetalRenderer::MetalRenderer()
     // targets are created at the reduced resolution. 0 when MetalFX is inactive => native resolution,
     // no change. This is the only place the scale is armed; it is reset to 0 in the destructor.
     LatteTexture_setMetalFXRenderScalePercent(m_metalFXActive ? m_metalFXRenderScale : 0);
+
+    // Experimental MetalFX "Selective Render Scaling": only meaningful while MetalFX scaling is active.
+    // When active, scale only large render targets and keep small (UI/intermediate) ones native. Latched
+    // here alongside the scale percent and reset to false in the destructor. When MetalFX is inactive the
+    // scale percent is 0 so this flag has no effect regardless of its value.
+    LatteTexture_setMetalFXSelectiveScaling(m_metalFXActive && ActiveSettings::ExperimentalMetalFXSelectiveScaling());
 }
 
 MetalRenderer::~MetalRenderer()
@@ -377,6 +383,7 @@ MetalRenderer::~MetalRenderer()
     // the scaler + owned intermediate textures. nullptr when the feature was never enabled, so this
     // is a no-op in the default configuration.
     LatteTexture_setMetalFXRenderScalePercent(0);
+    LatteTexture_setMetalFXSelectiveScaling(false);
     delete m_metalFXUpscaler;
 
     m_nullBuffer->release();

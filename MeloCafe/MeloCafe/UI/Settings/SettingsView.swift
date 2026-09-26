@@ -382,6 +382,13 @@ struct SettingsView: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Toggle("Selective Render Scaling", isOn: configManager.experimentalMetalFXSelectiveScaling)
+                            Text("Only lower the resolution of large render targets (the main scene and full-screen effects) and keep small targets — HUD, menus, and intermediate buffers — at native resolution. This can keep 2D and text sharper and reduce overhead, with a smaller GPU saving than scaling everything. Only used while MetalFX is enabled.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     } header: {
                         Text("Experimental Graphics")
                     } footer: {
