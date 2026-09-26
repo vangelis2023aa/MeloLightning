@@ -359,6 +359,16 @@ struct SettingsView: View {
                         }
 
                         VStack(alignment: .leading, spacing: 4) {
+                            Picker("MetalFX Mode", selection: configManager.experimentalMetalFXMode) {
+                                Text("Spatial").tag(0)
+                                Text("Temporal (Unavailable)").tag(1).disabled(true)
+                            }
+                            Text("Spatial upscaling works from the finished frame alone. Temporal upscaling is not available: it requires per-frame depth, motion vectors, and a subpixel jitter sequence that Wii U titles do not produce and that cannot be synthesized without fabricating data, so enabling it would only add ghosting.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        VStack(alignment: .leading, spacing: 4) {
                             Picker("Internal Resolution", selection: configManager.experimentalMetalFXRenderScale) {
                                 Text("50% (Performance)").tag(50)
                                 Text("67% (Balanced)").tag(67)

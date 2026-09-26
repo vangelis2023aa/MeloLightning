@@ -319,8 +319,14 @@ MetalRenderer::MetalRenderer()
         if (scale < 25) scale = 25;
         else if (scale > 100) scale = 100;
 
+        // Only Spatial (mode 0) is implemented. Temporal (mode 1) is intentionally not wired up: it
+        // needs per-frame depth, motion vectors and a jitter sequence the color-only Wii U scanout
+        // cannot provide, and the UI keeps it disabled. If the config somehow requests anything other
+        // than Spatial (e.g. a hand-edited file), leave MetalFX off rather than fabricate those inputs.
+        const bool modeIsSpatial = (ActiveSettings::ExperimentalMetalFXMode() == 0);
+
         // 100% means "native, no upscale" -> leave MetalFX entirely off so behavior is unchanged.
-        if (scale < 100)
+        if (modeIsSpatial && scale < 100)
         {
             if (MetalFXSpatialUpscaler::IsSupported(m_device))
             {
@@ -333,6 +339,10 @@ MetalRenderer::MetalRenderer()
             {
                 cemuLog_log(LogType::Force, "MetalFX: requested but not supported on this device; using normal rendering");
             }
+        }
+        else if (!modeIsSpatial)
+        {
+            cemuLog_log(LogType::Force, "MetalFX: non-Spatial mode requested but only Spatial is implemented; using normal rendering");
         }
     }
 

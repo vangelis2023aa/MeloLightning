@@ -194,6 +194,21 @@ class ConfigManager: ObservableObject {
         }
     }
 
+    // MetalFX Mode: 0 = Spatial (only implemented mode), 1 = Temporal (visible but disabled in the
+    // UI). Temporal needs per-frame depth, motion vectors and a jitter sequence the emulator's
+    // color-only scanout cannot provide, so the setter clamps anything other than Spatial back to
+    // Spatial and Temporal can never be persisted.
+    var experimentalMetalFXMode: Binding<Int> {
+        Binding {
+            Int(self.config.experimentalMetalFXMode)
+        } set: {
+            // Only Spatial (0) is implemented; reject any other selection (e.g. the disabled
+            // Temporal row) so Temporal is never written to the config.
+            self.config.experimentalMetalFXMode = ($0 == 0) ? 0 : self.config.experimentalMetalFXMode
+            self.objectWillChange.send()
+        }
+    }
+
     var renderUpsideDown: Binding<Bool> {
         Binding {
             self.config.renderUpsideDown

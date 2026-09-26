@@ -558,8 +558,15 @@ struct CemuConfig
 	// The MetalFX color-processing mode is NOT a user setting: it is derived at present time from the
 	// scanout pixel format (sRGB format => Linear, plain UNORM => Perceptual) so the upscale is always
 	// color-neutral. Exposing it as a knob previously allowed a mismatch that darkened the image.
+	//  - mode                 => 0 Spatial (the only implemented mode). 1 (Temporal) is reserved and
+	//                            intentionally NOT selectable: MetalFX Temporal requires per-frame
+	//                            depth, screen-space motion vectors and a subpixel jitter sequence that
+	//                            the Wii U scanout (a finished, color-only composited image) does not
+	//                            provide and that cannot be synthesized without fabricating data. Any
+	//                            value other than Spatial leaves MetalFX inactive (present unchanged).
 	ConfigValue<bool>   experimental_metalfx_enable{ false };
 	ConfigValue<sint32> experimental_metalfx_render_scale{ 67 };
+	ConfigValue<sint32> experimental_metalfx_mode{ 0 };
 
 	XMLConfigParser Load(XMLConfigParser& parser);
 	XMLConfigParser Save(XMLConfigParser& parser);

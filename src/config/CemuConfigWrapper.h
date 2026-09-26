@@ -134,6 +134,7 @@ typedef NS_ENUM(NSInteger, ObjCPrecompiledShaderOption) {
 // Experimental MetalFX spatial upscaling (Metal only; see "Experimental Graphics" settings section)
 @property (nonatomic) BOOL experimentalMetalFXEnable;
 @property (nonatomic) int experimentalMetalFXRenderScale;
+@property (nonatomic) int experimentalMetalFXMode;
 
 @property (nonatomic) BOOL overrideAppGammaPreference;
 @property (nonatomic) float overrideGammaValue;
