@@ -221,6 +221,15 @@ class ConfigManager: ObservableObject {
         }
     }
 
+    var experimentalWorkerTextureDecode: Binding<Bool> {
+        Binding {
+            self.config.experimentalWorkerTextureDecode
+        } set: {
+            self.config.experimentalWorkerTextureDecode = $0
+            self.objectWillChange.send()
+        }
+    }
+
     var experimentalAudioBufferBlocks: Binding<Int> {
         Binding {
             Int(self.config.experimentalAudioBufferBlocks)

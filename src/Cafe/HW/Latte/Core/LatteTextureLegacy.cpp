@@ -37,10 +37,18 @@ void LatteTexture_setEffectiveTextureScale(LatteConst::ShaderType shaderType, si
 }
 
 void LatteTextureLoader_UpdateTextureSliceData(LatteTexture* tex, uint32 sliceIndex, uint32 mipIndex, MPTR physImagePtr, MPTR physMipPtr, Latte::E_DIM dim, uint32 width, uint32 height, uint32 depth, uint32 mipLevels, uint32 pitch, Latte::E_HWTILEMODE tileMode, uint32 swizzle, bool dumpTex);
+bool LatteTextureLoader_ReloadDataParallel(LatteTexture* tex); // Experimental Worker-Thread Texture Decode (default OFF)
 
 void LatteTexture_ReloadData(LatteTexture* tex)
 {
 	tex->reloadCount++;
+	// Experimental: decode all slices/mips in parallel on worker threads, joining before any upload.
+	// Returns false (and does nothing observable) whenever it isn't eligible, so the serial loop runs.
+	if (ActiveSettings::ExperimentalWorkerTextureDecode() && LatteTextureLoader_ReloadDataParallel(tex))
+	{
+		tex->lastUpdateEventCounter = LatteTexture_getNextUpdateEventCounter();
+		return;
+	}
 	for(sint32 mip=0; mip<tex->mipLevels; mip++)
 	{
 		if(tex->dim == Latte::E_DIM::DIM_2D_ARRAY ||

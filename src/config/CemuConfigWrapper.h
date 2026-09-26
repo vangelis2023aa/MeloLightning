@@ -135,6 +135,7 @@ typedef NS_ENUM(NSInteger, ObjCPrecompiledShaderOption) {
 @property (nonatomic) BOOL experimentalExtendedThreadQuantum;
 @property (nonatomic) BOOL experimentalTextureViewFastPath;
 @property (nonatomic) BOOL experimentalDecodeCache;
+@property (nonatomic) BOOL experimentalWorkerTextureDecode;
 @property (nonatomic) int experimentalAudioBufferBlocks;
 @property (nonatomic) int experimentalAudioAntiClip;
 

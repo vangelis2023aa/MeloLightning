@@ -383,6 +383,13 @@ struct SettingsView: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Toggle("Decode Textures on Worker Threads", isOn: configManager.experimentalWorkerTextureDecode)
+                            Text("Unpacking a texture (untiling and converting it) is CPU work that normally happens entirely on the single graphics thread. When a texture has several faces or layers to unpack — cubemaps, array textures, 3D textures, mip chains — spread that unpacking across a few background threads and wait for it to finish before uploading. This can shorten the pause that texture loads cause on the graphics thread, which helps most when the game is CPU-bound. It briefly uses more CPU cores, so it can raise heat during heavy texture loading; if the device gets hotter without running smoother, turn it off. The image is identical either way.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                     }
                 } header: {

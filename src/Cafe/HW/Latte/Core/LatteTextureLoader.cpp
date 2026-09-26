@@ -2,6 +2,9 @@
 #include "Cafe/HW/Latte/LatteAddrLib/LatteAddrLib.h"
 #include "config/ActiveSettings.h"
 #include "Cafe/CafeSystem.h"
+#include "util/helpers/Semaphore.h"
+#include <thread>
+#include <atomic>
 
 //#define BENCHMARK_TEXTURE_DECODING		// if defined, time it takes to decode textures will be measured and logged to log.txt
 
@@ -115,7 +118,125 @@ namespace
 			h1 = ((h1 << 27) | (h1 >> 37)) * 0xC2B2AE3D27D4EB4FULL;
 		}
 	}
+
+	// ---- Experimental Worker-Thread Texture Decode (default OFF; ExperimentalWorkerTextureDecode) ----
+	// A tiny fixed-size, process-lifetime fork-join pool used ONLY to run the pure, reentrant CPU decode
+	// (untile + format convert) of independent (slice,mip) units in parallel. Each unit owns its own
+	// LatteTextureLoaderCtx and its own output buffer; guest memory is read-only during decode; the
+	// decoders and the tiling-address math (ComputeSurfaceAddrFromCoordMacroTiledCached* + the per-ctx
+	// CachedSurfaceAddrInfo, incl. its microTilePixelIndexTable) hold no shared mutable state. The pool
+	// joins fully before the caller uploads anything, so a decoded slice is never visible to the renderer
+	// before its decode completed. The calling (Latte) thread participates as a worker, so forward
+	// progress holds even if the helper threads are descheduled. Helper count is clamped small to bound
+	// how many cores are lit at once (thermal budget). Driven only from the single Latte thread.
+	class TexDecodeForkJoin
+	{
+	public:
+		using JobFn = void(*)(void* ctx, size_t index);
+
+		// Runs fn(ctx, i) for i in [0,count), blocking until all indices have completed.
+		void run(size_t count, JobFn fn, void* ctx)
+		{
+			if (count == 0)
+				return;
+			ensureStarted();
+			m_fn = fn;
+			m_ctx = ctx;
+			m_total = count;
+			m_nextIndex.store(0, std::memory_order_relaxed);
+			// Publish the job, then release one work token per helper. Semaphore notify/wait synchronize
+			// on the same mutex, so the stores above happen-before a helper observes its token.
+			for (uint32 i = 0; i < m_helperCount; i++)
+				m_workSem.notify();
+			drain(); // the Latte thread pulls indices too (guaranteed progress if helpers are asleep)
+			// Full join barrier: every helper must report done before we touch any output buffer.
+			for (uint32 i = 0; i < m_helperCount; i++)
+				m_doneSem.wait();
+			m_fn = nullptr;
+			m_ctx = nullptr;
+		}
+
+	private:
+		void drain()
+		{
+			for (;;)
+			{
+				size_t i = m_nextIndex.fetch_add(1, std::memory_order_relaxed);
+				if (i >= m_total)
+					break;
+				m_fn(m_ctx, i);
+			}
+		}
+
+		void helperLoop()
+		{
+			for (;;)
+			{
+				m_workSem.wait();
+				drain();
+				m_doneSem.notify();
+			}
+		}
+		void ensureStarted()
+		{
+			if (m_started)
+				return;
+			uint32 hw = std::thread::hardware_concurrency();
+			uint32 helpers = (hw > 1) ? (hw - 1) : 1;
+			if (helpers > 3)
+				helpers = 3; // bound cores lit at once; with the Latte thread this is helpers+1 wide
+			m_helperCount = helpers;
+			for (uint32 i = 0; i < m_helperCount; i++)
+				std::thread(&TexDecodeForkJoin::helperLoop, this).detach();
+			m_started = true;
+		}
+
+		bool m_started = false;
+		uint32 m_helperCount = 0;
+		Semaphore m_workSem;
+		Semaphore m_doneSem;
+		std::atomic<size_t> m_nextIndex{0};
+		size_t m_total = 0;
+		JobFn m_fn = nullptr;
+		void* m_ctx = nullptr;
+	};
+
+	// Intentionally leaked (process lifetime): the detached helper threads block on this pool's
+	// semaphores forever, so destroying its sync primitives at static teardown would be UB. Only the
+	// Latte thread ever calls this, so the local-static init is not contended.
+	TexDecodeForkJoin& GetTexDecodeForkJoin()
+	{
+		static TexDecodeForkJoin* s_pool = new TexDecodeForkJoin();
+		return *s_pool;
+	}
+
+	// One independent decode unit (a single slice of a single mip).
+	struct SliceDecodeJob
+	{
+		LatteTextureLoaderCtx ctx{}; // zero-init to match the serial `LatteTextureLoaderCtx = {0}`
+		TextureDecoder* decoder = nullptr;
+		uint32 sliceIndex = 0;
+		uint32 mipIndex = 0;
+		sint32 imageSize = 0;
+		std::vector<uint8> buffer;
+		bool skipDecode = false;   // decode-cache (M1) hit: buffer already holds the decoded bytes
+		bool needCachePut = false; // decode-cache (M1) miss: store buffer after the join
+		uint64 cacheH0 = 0, cacheH1 = 0;
+		DecodeCacheParams cacheParams{};
+	};
+
+	// Worker body: pure decode into the job's own buffer. Touches no shared state (no cache, no upload
+	// buffer, no renderer) — safe to run on any thread concurrently.
+	void TexDecodeJobFn(void* ctxPtr, size_t index)
+	{
+		auto* jobs = reinterpret_cast<std::vector<SliceDecodeJob>*>(ctxPtr);
+		SliceDecodeJob& j = (*jobs)[index];
+		if (!j.skipDecode)
+			j.decoder->decode(&j.ctx, j.buffer.data());
+	}
 }
+
+
 
 void LatteTextureLoader_begin(LatteTextureLoaderCtx* textureLoader, uint32 sliceIndex, uint32 mipIndex, MPTR physImagePtr, MPTR physMipPtr, Latte::E_GX2SURFFMT format, Latte::E_DIM dim, uint32 width, uint32 height, uint32 depth, uint32 mipLevels, uint32 pitch, Latte::E_HWTILEMODE tileMode, uint32 swizzle)
 {
@@ -746,6 +867,144 @@ void LatteTextureLoader_loadTextureDataIntoSlice(LatteTexture* hostTexture, sint
 	{
 		g_renderer->texture_loadSlice(hostTexture, width, height, depth, pixelData, sliceIndex, mipIndex, compressedImageSize);
 	}
+}
+
+// Experimental Worker-Thread Texture Decode (default OFF). Returns true when it fully (re)loaded the
+// texture through the parallel fork-join path; false tells the caller to run the original serial loop.
+//
+// Concurrency model / ownership boundaries:
+//   Phase 1 (Latte thread only): enumerate every (slice,mip) unit in the SAME order as the serial loop
+//     and do all thread-affine setup — LatteTextureLoader_begin, decoder texel counts, image size, the
+//     one-time host allocation, each unit's own output buffer, and the single-threaded M1 decode-cache
+//     probe. Nothing here is touched by workers.
+//   Phase 2 (fork-join pool; the Latte thread participates): run ONLY the pure decoders. Each worker
+//     writes to its own job's buffer, reading read-only guest memory through its own ctx copy. No shared
+//     mutable state (no cache, no upload buffer, no renderer). Full join barrier before Phase 3.
+//   Phase 3 (Latte thread only, original order): store M1 cache entries, replay the serial change-tracker
+//     update, and upload each slice via the renderer.
+// No slice is uploaded before the join, so no decoded texture is visible to the renderer before its
+// decode completed (explicit ownership + join, not timing).
+bool LatteTextureLoader_ReloadDataParallel(LatteTexture* tex)
+{
+	// Overwrite/dump variants take separate paths in the serial loader; keep them serial.
+	if (ActiveSettings::DumpTexturesEnabled())
+		return false;
+	if (tex->overwriteInfo.hasFormatOverwrite || tex->overwriteInfo.hasResolutionOverwrite)
+		return false;
+
+	const Latte::E_GX2SURFFMT format = tex->format;
+	const Latte::E_DIM dim = tex->dim;
+	// One decoder per texture (format-driven). If none, the serial path performs the no-decoder clear.
+	TextureDecoder* decoder = g_renderer->texture_chooseDecodedFormat(format, tex->isDepth, dim, tex->width, tex->height);
+	if (!decoder)
+		return false;
+
+	// Enumerate units in the exact serial order (mip-major; slice order per dim).
+	std::vector<SliceDecodeJob> jobs;
+	for (sint32 mip = 0; mip < tex->mipLevels; mip++)
+	{
+		sint32 numSlices;
+		if (dim == Latte::E_DIM::DIM_2D_ARRAY || dim == Latte::E_DIM::DIM_2D_ARRAY_MSAA)
+			numSlices = std::max(tex->depth, 1);
+		else if (dim == Latte::E_DIM::DIM_CUBEMAP)
+			numSlices = (tex->depth / 6) * 6; // matches serial numFullCubeMaps*6
+		else if (dim == Latte::E_DIM::DIM_3D)
+			numSlices = std::max(tex->depth >> mip, 1);
+		else
+			numSlices = 1;
+		for (sint32 s = 0; s < numSlices; s++)
+		{
+			jobs.emplace_back();
+			SliceDecodeJob& j = jobs.back();
+			j.sliceIndex = (uint32)s;
+			j.mipIndex = (uint32)mip;
+			j.decoder = decoder;
+		}
+	}
+	// Nothing to gain without at least two independent units; let the serial path handle it.
+	if (jobs.size() < 2)
+		return false;
+
+	// Ensure the host texture exists before any upload (mirrors the serial lazy-allocate). Safe even if
+	// we fall back below: the serial loop then sees isDataDefined already true and skips its own alloc.
+	if (tex->isDataDefined == false)
+	{
+		tex->AllocateOnHost();
+		tex->isDataDefined = true;
+	}
+
+	// Phase 1 (Latte thread): per-unit setup + M1 decode-cache probe. Bounded by a transient-byte budget
+	// so a huge mip chain can't balloon memory; on overflow fall back to serial (correct, and frees what
+	// we allocated). Cache probe/store stay single-threaded here — workers never touch M1.
+	const size_t kMaxTransientBytes = 96ull * 1024 * 1024;
+	size_t totalBytes = 0;
+	const bool useDecodeCache = ActiveSettings::ExperimentalDecodeCache();
+	for (SliceDecodeJob& j : jobs)
+	{
+		LatteTextureLoader_begin(&j.ctx, j.sliceIndex, j.mipIndex, tex->physAddress, tex->physMipAddress, format, dim, tex->width, tex->height, tex->depth, tex->mipLevels, tex->pitch, tex->tileMode, tex->swizzle);
+		j.ctx.dump = false;
+		j.ctx.decodedTexelCountX = decoder->getTexelCountX(&j.ctx);
+		j.ctx.decodedTexelCountY = decoder->getTexelCountY(&j.ctx);
+		j.imageSize = (sint32)decoder->calculateImageSize(&j.ctx);
+		if (j.imageSize <= 0)
+			return false; // unexpected sizing; let the serial path handle it
+		totalBytes += (size_t)j.imageSize;
+		if (totalBytes > kMaxTransientBytes)
+			return false;
+		j.buffer.resize((size_t)j.imageSize);
+
+		if (useDecodeCache && j.ctx.inputData && j.ctx.maxOffsetOutdated > 0)
+		{
+			DecodeCacheParams dcp{};
+			dcp.format = (uint32)format;
+			dcp.dim = (uint32)dim;
+			dcp.width = (uint32)j.ctx.width;
+			dcp.height = (uint32)j.ctx.height;
+			dcp.depth = (uint32)tex->depth;
+			dcp.pitch = (uint32)j.ctx.pitch;
+			dcp.tileMode = (uint32)j.ctx.tileMode;
+			dcp.pipeSwizzle = j.ctx.pipeSwizzle;
+			dcp.bankSwizzle = j.ctx.bankSwizzle;
+			dcp.bpp = j.ctx.bpp;
+			dcp.sliceIndex = j.sliceIndex;
+			dcp.mipIndex = j.mipIndex;
+			dcp.surfaceInfoHeight = j.ctx.surfaceInfoHeight;
+			dcp.surfaceInfoDepth = j.ctx.surfaceInfoDepth;
+			dcp.imageSize = (uint32)j.imageSize;
+			dcp.decodedTexelCountX = (uint32)j.ctx.decodedTexelCountX;
+			dcp.decodedTexelCountY = (uint32)j.ctx.decodedTexelCountY;
+			dcp.isDepth = tex->isDepth ? 1u : 0u;
+			const uint32 srcLen = (uint32)j.ctx.maxOffsetOutdated;
+			DecodeCache_HashSource(j.ctx.inputData, srcLen, j.cacheH0, j.cacheH1);
+			DecodeCache_FoldParams(dcp, j.cacheH0, j.cacheH1);
+			if (g_textureDecodeCache.tryGet(j.cacheH0, j.cacheH1, dcp, j.buffer.data(), (uint32)j.imageSize))
+				j.skipDecode = true;
+			else
+			{
+				j.needCachePut = true;
+				j.cacheParams = dcp;
+			}
+		}
+	}
+
+	// Phase 2: pure parallel decode into per-job buffers (Latte thread participates; full join inside).
+	GetTexDecodeForkJoin().run(jobs.size(), &TexDecodeJobFn, &jobs);
+
+	// Phase 3 (Latte thread, original order): store new cache entries, replay the serial change-tracker
+	// update, then upload each slice.
+	for (SliceDecodeJob& j : jobs)
+	{
+		if (j.needCachePut)
+			g_textureDecodeCache.put(j.cacheH0, j.cacheH1, j.cacheParams, j.buffer.data(), (uint32)j.imageSize);
+		if (j.mipIndex == 0 || (tex->texDataPtrLow == 0 && tex->texDataPtrHigh == 0))
+		{
+			tex->texDataPtrLow = tex->physAddress + j.ctx.minOffsetOutdated;
+			tex->texDataPtrHigh = tex->physAddress + j.ctx.maxOffsetOutdated;
+			LatteTC_ResetTextureChangeTracker(tex, true);
+		}
+		LatteTextureLoader_loadTextureDataIntoSlice(tex, j.ctx.width, j.ctx.height, (sint32)tex->depth, (sint32)tex->mipLevels, j.buffer.data(), (sint32)j.sliceIndex, (sint32)j.mipIndex, (uint32)j.imageSize);
+	}
+	return true;
 }
 
 void LatteTextureLoader_UpdateTextureSliceData(LatteTexture* tex, uint32 sliceIndex, uint32 mipIndex, MPTR physImagePtr, MPTR physMipPtr, Latte::E_DIM dim, uint32 width, uint32 height, uint32 depth, uint32 mipLevels, uint32 pitch, Latte::E_HWTILEMODE tileMode, uint32 swizzle, bool dumpTex)

@@ -549,6 +549,7 @@ struct CemuConfig
 	ConfigValue<bool> experimental_extended_thread_quantum{ false }; // coreinit: raise PPC thread quantum so reschedules (global scheduler mutex) happen less often
 	ConfigValue<bool> experimental_texture_view_fast_path{ false };  // Latte: reuse the last resolved texture view per slot to skip the view-lookup hash probe on steady-state redraws
 	ConfigValue<bool> experimental_decode_cache{ false };            // Latte: content-addressed cache of decoded (untiled) texture slices; reuse a prior decode when identical source bytes + params recur (skips CPU untile/convert)
+	ConfigValue<bool> experimental_worker_texture_decode{ false };   // Latte: fork-join parallel CPU texture decode across worker threads (per-job buffers, join before any upload); shortens Latte-thread stall during multi-slice/mip (re)loads
 	// Experimental audio buffering (iOS): target number of 12ms audio blocks kept buffered ahead of
 	// playback. 0 = disabled = existing audio_delay behavior (default ~2 blocks / 24ms). A larger
 	// value trades latency for resilience against underruns (crackle/dropouts). Clamped to the ring
