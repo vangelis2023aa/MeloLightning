@@ -376,6 +376,13 @@ struct SettingsView: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Toggle("Cache Decoded Textures", isOn: configManager.experimentalDecodeCache)
+                            Text("Keep a memory cache of textures the CPU has already unpacked. When a game re-uploads texture data the emulator has decoded before — the same bytes recurring, or a texture that alternates between a few images — reuse the earlier result instead of unpacking it again. Cuts CPU work when the game is CPU-bound; uses some extra memory. If it misbehaves it can cause momentary wrong textures; turn it off if you see that.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                     }
                 } header: {

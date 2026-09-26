@@ -172,6 +172,11 @@ bool ActiveSettings::ExperimentalTextureViewFastPath()
 	return GetConfig().experimental_texture_view_fast_path;
 }
 
+bool ActiveSettings::ExperimentalDecodeCache()
+{
+	return GetConfig().experimental_decode_cache;
+}
+
 bool ActiveSettings::ExperimentalMetalFXEnable()
 {
 	return GetConfig().experimental_metalfx_enable;

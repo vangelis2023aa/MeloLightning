@@ -212,6 +212,15 @@ class ConfigManager: ObservableObject {
         }
     }
 
+    var experimentalDecodeCache: Binding<Bool> {
+        Binding {
+            self.config.experimentalDecodeCache
+        } set: {
+            self.config.experimentalDecodeCache = $0
+            self.objectWillChange.send()
+        }
+    }
+
     var experimentalAudioBufferBlocks: Binding<Int> {
         Binding {
             Int(self.config.experimentalAudioBufferBlocks)

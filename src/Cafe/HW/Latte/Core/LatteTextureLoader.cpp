@@ -10,6 +10,113 @@ uint64 textureDecodeBenchmark_perFormatSum[0x40] = { 0 }; // duration sum per te
 uint64 textureDecodeBenchmark_totalSum = 0;
 #endif
 
+namespace
+{
+	// Experimental Decode Cache (default OFF; gated by ActiveSettings::ExperimentalDecodeCache()).
+	// The CPU texture decode (untile + format convert) is a pure function of (source bytes, decode
+	// parameters), so when the exact same source bytes and parameters recur we can memcpy a previously
+	// decoded result instead of running the untile/convert again. This helps content that alternates
+	// between a few images (double-buffered sampler targets, animated UI) and textures that are evicted
+	// then re-faulted with identical bytes. Touched only from the single Latte thread (inside
+	// LatteTextureLoader_UpdateTextureSliceData), so it needs no locking. Bounded by a byte budget with
+	// LRU eviction. All 18 fields are uint32 (no padding) so the struct is memcmp/hash safe.
+	struct DecodeCacheParams
+	{
+		uint32 format, dim, width, height, depth, pitch, tileMode, pipeSwizzle, bankSwizzle;
+		uint32 bpp, sliceIndex, mipIndex, surfaceInfoHeight, surfaceInfoDepth, imageSize;
+		uint32 decodedTexelCountX, decodedTexelCountY, isDepth;
+		bool operator==(const DecodeCacheParams& o) const { return memcmp(this, &o, sizeof(DecodeCacheParams)) == 0; }
+	};
+	class DecodeCache
+	{
+		struct Entry
+		{
+			uint64 verify;
+			DecodeCacheParams params;
+			std::vector<uint8> data;
+			uint64 lastUse;
+		};
+		std::unordered_map<uint64, Entry> m_entries; // keyed by primary hash h0; verify(h1)+params guard against collisions
+		uint64 m_useCounter = 0;
+		size_t m_totalBytes = 0;
+		static constexpr size_t kMaxBytes = 64 * 1024 * 1024; // 64 MiB budget
+	public:
+		bool tryGet(uint64 h0, uint64 h1, const DecodeCacheParams& p, uint8* out, uint32 size)
+		{
+			auto it = m_entries.find(h0);
+			if (it == m_entries.end())
+				return false;
+			Entry& e = it->second;
+			if (e.verify != h1 || e.data.size() != size || !(e.params == p))
+				return false; // h0 collision on different content/params -> treat as miss (never returns wrong bytes)
+			memcpy(out, e.data.data(), size);
+			e.lastUse = ++m_useCounter;
+			return true;
+		}
+		void put(uint64 h0, uint64 h1, const DecodeCacheParams& p, const uint8* data, uint32 size)
+		{
+			if (size == 0 || size > kMaxBytes)
+				return;
+			auto it = m_entries.find(h0);
+			if (it != m_entries.end())
+				m_totalBytes -= it->second.data.size();
+			Entry& e = m_entries[h0];
+			e.verify = h1;
+			e.params = p;
+			e.data.assign(data, data + size);
+			e.lastUse = ++m_useCounter;
+			m_totalBytes += size;
+			while (m_totalBytes > kMaxBytes && m_entries.size() > 1)
+				evictOldest();
+		}
+	private:
+		void evictOldest()
+		{
+			auto oldest = m_entries.begin();
+			for (auto it = m_entries.begin(); it != m_entries.end(); ++it)
+				if (it->second.lastUse < oldest->second.lastUse)
+					oldest = it;
+			m_totalBytes -= oldest->second.data.size();
+			m_entries.erase(oldest);
+		}
+	};
+	DecodeCache g_textureDecodeCache;
+	// Two independent 64-bit hashes over the slice source bytes (one pass), giving a 128-bit content
+	// key; the decode parameters are then folded in so identical bytes with different decode params
+	// never collide. h1 (with params) is stored as the verify hash and re-checked on every hit.
+	inline void DecodeCache_HashSource(const uint8* data, size_t len, uint64& h0, uint64& h1)
+	{
+		h0 = 1469598103934665603ULL;
+		h1 = 0x9E3779B97F4A7C15ULL;
+		size_t i = 0;
+		const size_t len8 = len & ~size_t(7);
+		for (; i < len8; i += 8)
+		{
+			uint64 v;
+			memcpy(&v, data + i, sizeof(uint64));
+			h0 = (h0 ^ v) * 1099511628211ULL;
+			h1 += v;
+			h1 = ((h1 << 31) | (h1 >> 33)) * 0xFF51AFD7ED558CCDULL;
+		}
+		for (; i < len; ++i)
+		{
+			h0 = (h0 ^ data[i]) * 1099511628211ULL;
+			h1 = (h1 ^ data[i]) * 0x100000001B3ULL;
+		}
+	}
+
+	inline void DecodeCache_FoldParams(const DecodeCacheParams& p, uint64& h0, uint64& h1)
+	{
+		const uint32* w = reinterpret_cast<const uint32*>(&p);
+		for (size_t i = 0; i < sizeof(DecodeCacheParams) / sizeof(uint32); ++i)
+		{
+			h0 = (h0 ^ w[i]) * 1099511628211ULL;
+			h1 = (h1 + w[i] + 0x9E3779B9u);
+			h1 = ((h1 << 27) | (h1 >> 37)) * 0xC2B2AE3D27D4EB4FULL;
+		}
+	}
+}
+
 void LatteTextureLoader_begin(LatteTextureLoaderCtx* textureLoader, uint32 sliceIndex, uint32 mipIndex, MPTR physImagePtr, MPTR physMipPtr, Latte::E_GX2SURFFMT format, Latte::E_DIM dim, uint32 width, uint32 height, uint32 depth, uint32 mipLevels, uint32 pitch, Latte::E_HWTILEMODE tileMode, uint32 swizzle)
 {
 	textureLoader->physAddress = physImagePtr;
@@ -696,7 +803,48 @@ void LatteTextureLoader_UpdateTextureSliceData(LatteTexture* tex, uint32 sliceIn
 
 	if (tex->overwriteInfo.hasFormatOverwrite == false && tex->overwriteInfo.hasResolutionOverwrite == false)
 	{
-		texDecoder->decode(&textureLoader, pixelData);
+		bool decoded = false;
+		// Experimental Decode Cache: reuse a prior decode of identical source bytes + params (default OFF).
+		// Not used while dumping (the dump path re-reads the source separately). Purely additive: on any
+		// miss (or when disabled) the original decode below runs unchanged.
+		if (ActiveSettings::ExperimentalDecodeCache() && !textureLoader.dump && textureLoader.inputData && textureLoader.maxOffsetOutdated > 0)
+		{
+			DecodeCacheParams dcp{};
+			dcp.format = (uint32)format;
+			dcp.dim = (uint32)dim;
+			dcp.width = (uint32)textureLoader.width;
+			dcp.height = (uint32)textureLoader.height;
+			dcp.depth = depth;
+			dcp.pitch = (uint32)textureLoader.pitch;
+			dcp.tileMode = (uint32)textureLoader.tileMode;
+			dcp.pipeSwizzle = textureLoader.pipeSwizzle;
+			dcp.bankSwizzle = textureLoader.bankSwizzle;
+			dcp.bpp = textureLoader.bpp;
+			dcp.sliceIndex = sliceIndex;
+			dcp.mipIndex = mipIndex;
+			dcp.surfaceInfoHeight = textureLoader.surfaceInfoHeight;
+			dcp.surfaceInfoDepth = textureLoader.surfaceInfoDepth;
+			dcp.imageSize = imageSize;
+			dcp.decodedTexelCountX = (uint32)textureLoader.decodedTexelCountX;
+			dcp.decodedTexelCountY = (uint32)textureLoader.decodedTexelCountY;
+			dcp.isDepth = tex->isDepth ? 1u : 0u;
+			const uint32 srcLen = (uint32)textureLoader.maxOffsetOutdated;
+			uint64 h0, h1;
+			DecodeCache_HashSource(textureLoader.inputData, srcLen, h0, h1);
+			DecodeCache_FoldParams(dcp, h0, h1);
+			if (g_textureDecodeCache.tryGet(h0, h1, dcp, pixelData, imageSize))
+			{
+				decoded = true;
+			}
+			else
+			{
+				texDecoder->decode(&textureLoader, pixelData);
+				g_textureDecodeCache.put(h0, h1, dcp, pixelData, imageSize);
+				decoded = true;
+			}
+		}
+		if (!decoded)
+			texDecoder->decode(&textureLoader, pixelData);
 	}
 
 #ifdef BENCHMARK_TEXTURE_DECODING
