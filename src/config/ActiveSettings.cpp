@@ -162,6 +162,11 @@ bool ActiveSettings::ExperimentalCommitOnCpIdle()
 	return GetConfig().experimental_commit_on_cp_idle;
 }
 
+bool ActiveSettings::ExperimentalExtendedThreadQuantum()
+{
+	return GetConfig().experimental_extended_thread_quantum;
+}
+
 bool ActiveSettings::ExperimentalMetalFXEnable()
 {
 	return GetConfig().experimental_metalfx_enable;

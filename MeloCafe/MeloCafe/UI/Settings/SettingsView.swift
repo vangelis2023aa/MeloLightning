@@ -359,6 +359,13 @@ struct SettingsView: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Toggle("Longer CPU Time Slices", isOn: configManager.experimentalExtendedThreadQuantum)
+                            Text("Lets each emulated CPU thread run a little longer before the emulator switches to the next one, so it spends less time on scheduling bookkeeping. Can help frame rate when the game is CPU-bound. Does not make the CPU work any harder. Because it changes timing between threads, a few games may stutter or misbehave; turn it off if so. Ignored for games that ship their own timing profile.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 } header: {
                     Text("Experimental Performance")

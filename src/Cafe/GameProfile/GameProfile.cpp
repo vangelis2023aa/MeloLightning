@@ -174,6 +174,17 @@ void gameProfile_load()
 	// apply some settings immediately
 	ppcThreadQuantum = g_current_game_profile->GetThreadQuantum();
 
+	// Experimental: when the game profile has not overridden the quantum, raise the number of PPC
+	// instructions a thread executes before a reschedule. Each reschedule takes the global scheduler
+	// mutex and re-selects a runnable thread; a larger quantum amortizes that fixed overhead over more
+	// work, cutting host CPU spent in the scheduler on a CPU-bound frame. 90000 stays within the range
+	// shipped game profiles already use (20000-100000). Only applied when no per-game profile set a
+	// custom quantum (so profile overrides win), and threads still yield on blocking waits so this does
+	// not spin harder or trade thermals for FPS. Default OFF => unchanged behavior.
+	if (ActiveSettings::ExperimentalExtendedThreadQuantum() &&
+		ppcThreadQuantum == GameProfile::kThreadQuantumDefault)
+		ppcThreadQuantum = 90000;
+
 	if (ppcThreadQuantum != GameProfile::kThreadQuantumDefault)
 		cemuLog_log(LogType::Force, "Thread quantum set to {}", ppcThreadQuantum);
 }

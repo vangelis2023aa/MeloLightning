@@ -546,6 +546,7 @@ struct CemuConfig
 	ConfigValue<bool> experimental_surfacecopy_dest_dontcare{ false }; // Metal: skip loading a surface-copy destination that the copy fully overwrites (TBDR bandwidth)
 	ConfigValue<bool> experimental_present_dontcare{ false };        // Metal: skip loading the drawable in the full-screen present pass that fully overwrites it (TBDR bandwidth)
 	ConfigValue<bool> experimental_commit_on_cp_idle{ false };       // Metal: submit pending draws when the Latte command processor's ring drains, so the GPU starts sooner (CPU/GPU overlap)
+	ConfigValue<bool> experimental_extended_thread_quantum{ false }; // coreinit: raise PPC thread quantum so reschedules (global scheduler mutex) happen less often
 	// Experimental audio buffering (iOS): target number of 12ms audio blocks kept buffered ahead of
 	// playback. 0 = disabled = existing audio_delay behavior (default ~2 blocks / 24ms). A larger
 	// value trades latency for resilience against underruns (crackle/dropouts). Clamped to the ring

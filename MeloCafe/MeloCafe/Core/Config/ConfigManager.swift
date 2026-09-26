@@ -194,6 +194,15 @@ class ConfigManager: ObservableObject {
         }
     }
 
+    var experimentalExtendedThreadQuantum: Binding<Bool> {
+        Binding {
+            self.config.experimentalExtendedThreadQuantum
+        } set: {
+            self.config.experimentalExtendedThreadQuantum = $0
+            self.objectWillChange.send()
+        }
+    }
+
     var experimentalAudioBufferBlocks: Binding<Int> {
         Binding {
             Int(self.config.experimentalAudioBufferBlocks)
