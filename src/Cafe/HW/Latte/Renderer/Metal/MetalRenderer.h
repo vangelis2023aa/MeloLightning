@@ -632,6 +632,11 @@ private:
 	// source's usage flags satisfy MetalFX. Latched at construction; false => the copy path is unchanged.
 	bool m_metalFXDirectInput = false;
 
+	// Experimental "Sharp Present": when MetalFX has already upscaled to the present size, collapse the
+	// final present blit to a single-tap nearest copy instead of re-running the user's upscaling filter.
+	// Latched at construction; false => the present blit uses the user's chosen filter as before.
+	bool m_metalFXSharpPresent = false;
+
 	// State
 	MetalState m_state;
 

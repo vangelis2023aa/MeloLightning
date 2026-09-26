@@ -585,6 +585,13 @@ struct CemuConfig
 	// unless MetalFX scaling is active.
 	ConfigValue<bool>   experimental_metalfx_direct_input{ false };
 
+	// Experimental MetalFX "Sharp Present" (Metal only). false (default) = the final present blit uses
+	// the user's chosen upscaling filter (copy/bicubic/Hermite) as normal. true = once MetalFX has
+	// already upscaled to the exact present size, that filter would only resample the result 1:1, so the
+	// present blit is collapsed to a single-tap nearest copy — skipping a redundant multi-tap pass and
+	// keeping MetalFX's output crisp instead of re-softening it. Ignored unless MetalFX actually engaged.
+	ConfigValue<bool>   experimental_metalfx_sharp_present{ false };
+
 	XMLConfigParser Load(XMLConfigParser& parser);
 	XMLConfigParser Save(XMLConfigParser& parser);
 

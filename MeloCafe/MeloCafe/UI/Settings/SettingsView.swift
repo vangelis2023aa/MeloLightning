@@ -403,6 +403,13 @@ struct SettingsView: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Toggle("Sharp Present (skip redundant filter)", isOn: configManager.experimentalMetalFXSharpPresent)
+                            Text("Experimental. After MetalFX has already upscaled the frame to display size, skip the extra upscaling filter (bicubic/Hermite) on the final copy to the screen, which would only re-sample the image and slightly soften it. Only has an effect while MetalFX is upscaling. The picture may look slightly sharper; turn off if you prefer the softer look.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     } header: {
                         Text("Experimental Graphics")
                     } footer: {

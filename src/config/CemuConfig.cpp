@@ -305,6 +305,7 @@ XMLConfigParser CemuConfig::Load(XMLConfigParser& parser)
 	experimental_metalfx_mode = experimental.get("MetalFXMode", 0);
 	experimental_metalfx_selective_scaling = experimental.get("MetalFXSelectiveScaling", false);
 	experimental_metalfx_direct_input = experimental.get("MetalFXDirectInput", false);
+	experimental_metalfx_sharp_present = experimental.get("MetalFXSharpPresent", false);
 
 	// input
 	auto input = parser.get("Input");
@@ -495,6 +496,7 @@ XMLConfigParser CemuConfig::Save(XMLConfigParser& parser)
 	experimental.set("MetalFXMode", experimental_metalfx_mode.GetValue());
 	experimental.set("MetalFXSelectiveScaling", experimental_metalfx_selective_scaling.GetValue());
 	experimental.set("MetalFXDirectInput", experimental_metalfx_direct_input.GetValue());
+	experimental.set("MetalFXSharpPresent", experimental_metalfx_sharp_present.GetValue());
 
 	// input
 	auto input = config.set("Input");

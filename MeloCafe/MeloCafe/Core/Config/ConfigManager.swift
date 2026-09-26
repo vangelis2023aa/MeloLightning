@@ -236,6 +236,15 @@ class ConfigManager: ObservableObject {
         }
     }
 
+    var experimentalMetalFXSharpPresent: Binding<Bool> {
+        Binding {
+            self.config.experimentalMetalFXSharpPresent
+        } set: {
+            self.config.experimentalMetalFXSharpPresent = $0
+            self.objectWillChange.send()
+        }
+    }
+
     var renderUpsideDown: Binding<Bool> {
         Binding {
             self.config.renderUpsideDown

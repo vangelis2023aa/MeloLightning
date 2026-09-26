@@ -138,6 +138,7 @@ typedef NS_ENUM(NSInteger, ObjCPrecompiledShaderOption) {
 @property (nonatomic) int experimentalMetalFXMode;
 @property (nonatomic) BOOL experimentalMetalFXSelectiveScaling;
 @property (nonatomic) BOOL experimentalMetalFXDirectInput;
+@property (nonatomic) BOOL experimentalMetalFXSharpPresent;
 
 @property (nonatomic) BOOL overrideAppGammaPreference;
 @property (nonatomic) float overrideGammaValue;

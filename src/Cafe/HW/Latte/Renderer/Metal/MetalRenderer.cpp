@@ -361,6 +361,11 @@ MetalRenderer::MetalRenderer()
     // so it cannot flip mid-session; TryApplyMetalFX() reads only this member. When MetalFX is inactive
     // the scaler is never allocated so this flag has no effect regardless of its value.
     m_metalFXDirectInput = m_metalFXActive && ActiveSettings::ExperimentalMetalFXDirectInput();
+
+    // Experimental MetalFX "Sharp Present": only meaningful while MetalFX scaling is active. Latched here
+    // so it cannot flip mid-session; DrawBackbufferQuad() reads only this member and only after MetalFX
+    // actually engaged, so it has no effect when MetalFX is inactive or passed the frame through.
+    m_metalFXSharpPresent = m_metalFXActive && ActiveSettings::ExperimentalMetalFXSharpPresent();
 }
 
 MetalRenderer::~MetalRenderer()
@@ -686,7 +691,24 @@ void MetalRenderer::DrawBackbufferQuad(LatteTextureView* texView, RendererOutput
     // it would the original. Any failure returns presentTexture unchanged, so the present path is
     // never disturbed. Gated to !padView so the scaler is not recreated for the differently sized DRC.
     if (m_metalFXActive && m_metalFXUpscaler && !padView)
+    {
+        MTL::Texture* presentTextureBeforeMetalFX = presentTexture;
         presentTexture = TryApplyMetalFX(presentTexture, imageWidth, imageHeight);
+
+        // Experimental "Sharp Present": MetalFX just upscaled to the exact present size, so the output
+        // shader below would only resample it 1:1. If the user picked a multi-tap upscaling filter
+        // (bicubic/Hermite) that pass is pure overhead and slightly re-softens MetalFX's result, so
+        // collapse it to a single-tap nearest copy. Only when MetalFX actually engaged (texture changed);
+        // preserves the upside-down shader variant. Default OFF => the chosen filter is used unchanged.
+        if (m_metalFXSharpPresent && presentTexture != presentTextureBeforeMetalFX)
+        {
+            const bool upsideDown = (shader == RendererOutputShader::s_copy_shader_ud ||
+                                     shader == RendererOutputShader::s_bicubic_shader_ud ||
+                                     shader == RendererOutputShader::s_hermit_shader_ud);
+            shader = upsideDown ? RendererOutputShader::s_copy_shader_ud : RendererOutputShader::s_copy_shader;
+            useLinearTexFilter = false;
+        }
+    }
 
     // Create render pass
     auto& layer = GetLayer(!padView);

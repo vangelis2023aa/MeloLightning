@@ -141,6 +141,7 @@ public:
 	[[nodiscard]] static sint32 ExperimentalMetalFXMode();
 	[[nodiscard]] static bool   ExperimentalMetalFXSelectiveScaling();
 	[[nodiscard]] static bool   ExperimentalMetalFXDirectInput();
+	[[nodiscard]] static bool   ExperimentalMetalFXSharpPresent();
 
 private:
 	inline static bool s_setPathsCalled = false;
