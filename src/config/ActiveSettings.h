@@ -136,6 +136,7 @@ public:
 	[[nodiscard]] static bool ExperimentalPresentDontCare();
 	[[nodiscard]] static bool ExperimentalCommitOnCpIdle();
 	[[nodiscard]] static bool ExperimentalExtendedThreadQuantum();
+	[[nodiscard]] static bool ExperimentalTextureViewFastPath();
 
 	// Experimental MetalFX spatial upscaling (Metal/iOS). Read once by MetalRenderer at construction
 	// and latched; see CemuConfig experimental_metalfx_* flags.

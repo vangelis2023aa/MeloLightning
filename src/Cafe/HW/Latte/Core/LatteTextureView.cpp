@@ -22,6 +22,8 @@ LatteTextureView::LatteTextureView(LatteTexture* texture, sint32 firstMip, sint3
 
 LatteTextureView::~LatteTextureView()
 {
+	// Experimental texture-view fast path: drop any cached reference before the object is freed.
+	LatteTexture_NotifyTextureViewDeletedFastPath(this);
 	// unregister view
 	LatteTextureViewLookupCache::RemoveAll(this);
 	// remove from texture

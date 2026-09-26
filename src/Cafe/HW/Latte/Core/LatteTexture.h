@@ -334,6 +334,10 @@ float* LatteTexture_getEffectiveTextureScale(LatteConst::ShaderType shaderType, 
 LatteTextureView* LatteTexture_CreateTexture(Latte::E_DIM dim, MPTR physAddress, MPTR physMipAddress, Latte::E_GX2SURFFMT format, uint32 width, uint32 height, uint32 depth, uint32 pitch, uint32 mipLevels, uint32 swizzle, Latte::E_HWTILEMODE tileMode, bool isDepth, bool isRenderTarget = false);
 void LatteTexture_Delete(LatteTexture* texture);
 
+// Experimental texture-view fast path lifetime hook: invalidate any cached reference to a view that is
+// about to be destroyed (see LatteTextureLegacy.cpp). Safe/cheap to call even when the toggle is OFF.
+void LatteTexture_NotifyTextureViewDeletedFastPath(class LatteTextureView* view);
+
 void LatteTextureLoader_writeReadbackTextureToMemory(LatteTextureDefinition* textureData, uint32 sliceIndex, uint32 mipIndex, uint8* linearPixelData);
 
 sint32 LatteTexture_getEffectiveWidth(LatteTexture* texture);

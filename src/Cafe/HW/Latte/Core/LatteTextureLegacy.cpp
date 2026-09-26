@@ -4,6 +4,8 @@
 
 #include "Cafe/HW/Latte/Renderer/Renderer.h"
 
+#include "config/ActiveSettings.h"
+
 #ifdef ENABLE_OPENGL
 #include "Cafe/HW/Latte/Renderer/OpenGL/OpenGLRenderer.h"
 #include "Cafe/HW/Latte/Renderer/OpenGL/LatteTextureGL.h"
@@ -108,8 +110,45 @@ Latte::E_GX2SURFFMT LatteTexture_ReconstructGX2Format(const Latte::LATTE_SQ_TEX_
 	return gx2Format;
 }
 
+// Experimental texture-view fast path (experimental_texture_view_fast_path). Per bound texture slot,
+// remember which resolved LatteTextureView the (shader, texture-descriptor) combination produced last
+// time, so a steady-state redraw can substitute the cached view instead of re-probing the view lookup
+// hash map every draw. The 6 texture-resource register words plus the owning shader fully determine the
+// arguments passed to LatteTextureViewLookupCache::lookup()/lookupWithColorOrDepthType() (the decode
+// below is a pure function of those words), so identical words + identical shader => identical lookup
+// result. The full decode and the entire post-lookup tail (change detection, reload, barrier tracking,
+// effective-scale update) still run every draw, so this only elides the map probe and never alters the
+// texture-cache behavior that the alias-family and RESINFO fixes depend on. View lifetime is guarded by
+// LatteTexture_NotifyTextureViewDeletedFastPath(), invoked from ~LatteTextureView so a freed view can
+// never be handed back. Default OFF => the cache is never consulted or populated.
+namespace
+{
+	struct TexViewFastPathEntry
+	{
+		bool valid = false;
+		const LatteDecompilerShader* shaderContext = nullptr;
+		uint32 sig[6] = {};
+		LatteTextureView* view = nullptr;
+	};
+	constexpr uint32 kTexViewFastPathSlots = LATTE_CEMU_GS_TEX_UNIT_BASE + LATTE_NUM_MAX_TEX_UNITS;
+	TexViewFastPathEntry g_texViewFastPath[kTexViewFastPathSlots];
+}
+
+void LatteTexture_NotifyTextureViewDeletedFastPath(class LatteTextureView* view)
+{
+	// A view is being destroyed: drop any cached reference so the pointer can never dangle. Called
+	// unconditionally from ~LatteTextureView; harmless (and cheap: a fixed 82-slot scan) when the
+	// fast path is disabled because no slot is ever marked valid in that case.
+	for (auto& e : g_texViewFastPath)
+	{
+		if (e.view == view)
+			e.valid = false;
+	}
+}
+
 void LatteTexture_updateTexturesForStage(LatteDecompilerShader* shaderContext, uint32 glBackendBaseTexUnit, _LatteRegisterSetTextureUnit* texRegBase)
 {
+	const bool texViewFastPath = ActiveSettings::ExperimentalTextureViewFastPath();
 	for (sint32 z = 0; z < shaderContext->textureUnitListCount; z++)
 	{
 		sint32 textureIndex = shaderContext->textureUnitList[z];
@@ -180,18 +219,48 @@ void LatteTexture_updateTexturesForStage(LatteDecompilerShader* shaderContext, u
 
 		bool isDepthSampler = shaderContext->textureUsesDepthCompare[textureIndex];
 		// look for already existing texture
-		LatteTextureView* textureView;
-		if (!isDepthSampler)
-			textureView = LatteTextureViewLookupCache::lookup(physAddr, width, height, depth, pitch, viewFirstMip, viewNumMips, viewFirstSlice, viewNumSlices, format, dim);
-		else
-			textureView = LatteTextureViewLookupCache::lookupWithColorOrDepthType(physAddr, width, height, depth, pitch, viewFirstMip, viewNumMips, viewFirstSlice, viewNumSlices, format, dim, true);
+		LatteTextureView* textureView = nullptr;
+		// Experimental fast path: the resolved view is a pure function of the 6 texture-resource words
+		// (which produced every argument decoded above) plus the owning shader (isDepthSampler and the
+		// texture-unit list are shader properties). If those are unchanged since the last resolve for
+		// this slot, reuse the cached view and skip the lookup hash-map probe. The tail below still runs.
+		const uint32 texViewSlot = (uint32)textureIndex + glBackendBaseTexUnit;
+		const uint32* texRegWords = reinterpret_cast<const uint32*>(&texRegister);
+		const bool texViewFastPathSlot = texViewFastPath && texViewSlot < kTexViewFastPathSlots;
+		if (texViewFastPathSlot)
+		{
+			const TexViewFastPathEntry& e = g_texViewFastPath[texViewSlot];
+			if (e.valid && e.shaderContext == shaderContext &&
+				e.sig[0] == texRegWords[0] && e.sig[1] == texRegWords[1] && e.sig[2] == texRegWords[2] &&
+				e.sig[3] == texRegWords[3] && e.sig[4] == texRegWords[4] && e.sig[5] == texRegWords[5])
+			{
+				textureView = e.view;
+			}
+		}
 		if (!textureView)
 		{
-			// view not found, create a new mapping which will also create a new texture if necessary
-			textureView = LatteTexture_CreateMapping(physAddr, physMipAddr, width, height, depth, pitch, tileMode, swizzle, viewFirstMip, viewNumMips, viewFirstSlice, viewNumSlices, format, dim, dim, isDepthSampler);
-			if (textureView == nullptr)
-				continue;
-			LatteGPUState.repeatTextureInitialization = true;
+			if (!isDepthSampler)
+				textureView = LatteTextureViewLookupCache::lookup(physAddr, width, height, depth, pitch, viewFirstMip, viewNumMips, viewFirstSlice, viewNumSlices, format, dim);
+			else
+				textureView = LatteTextureViewLookupCache::lookupWithColorOrDepthType(physAddr, width, height, depth, pitch, viewFirstMip, viewNumMips, viewFirstSlice, viewNumSlices, format, dim, true);
+			if (!textureView)
+			{
+				// view not found, create a new mapping which will also create a new texture if necessary
+				textureView = LatteTexture_CreateMapping(physAddr, physMipAddr, width, height, depth, pitch, tileMode, swizzle, viewFirstMip, viewNumMips, viewFirstSlice, viewNumSlices, format, dim, dim, isDepthSampler);
+				if (textureView == nullptr)
+					continue;
+				LatteGPUState.repeatTextureInitialization = true;
+			}
+			else if (texViewFastPathSlot)
+			{
+				// resolved an existing view via the real lookup: remember it for the next redraw
+				TexViewFastPathEntry& e = g_texViewFastPath[texViewSlot];
+				e.valid = true;
+				e.shaderContext = shaderContext;
+				e.sig[0] = texRegWords[0]; e.sig[1] = texRegWords[1]; e.sig[2] = texRegWords[2];
+				e.sig[3] = texRegWords[3]; e.sig[4] = texRegWords[4]; e.sig[5] = texRegWords[5];
+				e.view = textureView;
+			}
 		}
 
 #ifdef ENABLE_OPENGL

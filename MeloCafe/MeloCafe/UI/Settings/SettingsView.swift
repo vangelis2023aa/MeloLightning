@@ -366,6 +366,13 @@ struct SettingsView: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Toggle("Reuse Texture Lookups", isOn: configManager.experimentalTextureViewFastPath)
+                            Text("When the same textures are bound draw after draw, reuse the previous lookup instead of searching for the texture again every time. Cuts CPU work while drawing, which can help when the game is CPU-bound. The texture contents are still checked and refreshed as normal each frame, so images stay correct. Very rarely a texture could appear stale for a frame; turn it off if you see that.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 } header: {
                     Text("Experimental Performance")

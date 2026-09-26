@@ -203,6 +203,15 @@ class ConfigManager: ObservableObject {
         }
     }
 
+    var experimentalTextureViewFastPath: Binding<Bool> {
+        Binding {
+            self.config.experimentalTextureViewFastPath
+        } set: {
+            self.config.experimentalTextureViewFastPath = $0
+            self.objectWillChange.send()
+        }
+    }
+
     var experimentalAudioBufferBlocks: Binding<Int> {
         Binding {
             Int(self.config.experimentalAudioBufferBlocks)

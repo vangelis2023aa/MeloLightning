@@ -167,6 +167,11 @@ bool ActiveSettings::ExperimentalExtendedThreadQuantum()
 	return GetConfig().experimental_extended_thread_quantum;
 }
 
+bool ActiveSettings::ExperimentalTextureViewFastPath()
+{
+	return GetConfig().experimental_texture_view_fast_path;
+}
+
 bool ActiveSettings::ExperimentalMetalFXEnable()
 {
 	return GetConfig().experimental_metalfx_enable;

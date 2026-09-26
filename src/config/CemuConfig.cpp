@@ -302,6 +302,7 @@ XMLConfigParser CemuConfig::Load(XMLConfigParser& parser)
 	experimental_present_dontcare = experimental.get("PresentDontCare", false);
 	experimental_commit_on_cp_idle = experimental.get("CommitOnCpIdle", false);
 	experimental_extended_thread_quantum = experimental.get("ExtendedThreadQuantum", false);
+	experimental_texture_view_fast_path = experimental.get("TextureViewFastPath", false);
 	experimental_audio_buffer_blocks = experimental.get("AudioBufferBlocks", 0);
 	experimental_audio_anti_clip = experimental.get("AudioAntiClip", 0);
 	experimental_metalfx_enable = experimental.get("MetalFXEnable", false);
@@ -497,6 +498,7 @@ XMLConfigParser CemuConfig::Save(XMLConfigParser& parser)
 	experimental.set("PresentDontCare", experimental_present_dontcare.GetValue());
 	experimental.set("CommitOnCpIdle", experimental_commit_on_cp_idle.GetValue());
 	experimental.set("ExtendedThreadQuantum", experimental_extended_thread_quantum.GetValue());
+	experimental.set("TextureViewFastPath", experimental_texture_view_fast_path.GetValue());
 	experimental.set("AudioBufferBlocks", experimental_audio_buffer_blocks.GetValue());
 	experimental.set("AudioAntiClip", experimental_audio_anti_clip.GetValue());
 	experimental.set("MetalFXEnable", experimental_metalfx_enable.GetValue());
