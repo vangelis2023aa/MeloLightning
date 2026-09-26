@@ -369,14 +369,16 @@ struct SettingsView: View {
                         }
 
                         VStack(alignment: .leading, spacing: 4) {
-                            Picker("Internal Resolution", selection: configManager.experimentalMetalFXRenderScale) {
-                                Text("50% (Performance)").tag(50)
-                                Text("67% (Balanced)").tag(67)
-                                Text("75%").tag(75)
-                                Text("85% (Quality)").tag(85)
-                                Text("100% (Native — no upscale)").tag(100)
-                            }
-                            Text("How much to lower the render resolution before upscaling. Lower percentages do less GPU work but look softer; 100% renders at native resolution and skips upscaling entirely. Only used while MetalFX is enabled.")
+                            Text("Internal Resolution: \(configManager.experimentalMetalFXRenderScale.wrappedValue)%")
+                            Slider(
+                                value: Binding(
+                                    get: { Double(configManager.experimentalMetalFXRenderScale.wrappedValue) },
+                                    set: { configManager.experimentalMetalFXRenderScale.wrappedValue = Int($0.rounded()) }
+                                ),
+                                in: 25...100,
+                                step: 1
+                            )
+                            Text("How much to lower the render resolution before upscaling. Drag for any value from 25% to 100%. Lower percentages do less GPU work but look softer; 100% renders at native resolution and skips upscaling entirely. Only used while MetalFX is enabled.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }

@@ -343,6 +343,13 @@ void LatteDecompiler_analyzeTEXClause(LatteDecompilerShaderContext* shaderContex
 			if( texInstruction.textureFetch.samplerIndex != 0 )
 				debugBreakpoint(); // sampler is ignored and should be 0
 			shaderContext->output->textureUnitMask[texInstruction.textureFetch.textureIndex] = true;
+			// RESINFO must report the guest's native texture dimensions. When the backing texture
+			// has a resolution overwrite (graphics-pack resolution scaling or MetalFX reduced-res),
+			// get_width()/get_height() return the reduced backing size. Emitting tex{}Scale for this
+			// unit lets the decompiler divide the effective size back to native (identity when the
+			// scale is 1.0), keeping textureSize() consistent with native-space fragcoord/texelFetch.
+			if( texInstruction.opcode == GPU7_TEX_INST_GET_TEXTURE_RESINFO )
+				shaderContext->analyzer.texUnitUsesTexelCoordinates.set(texInstruction.textureFetch.textureIndex);
 		}
 		else if( texInstruction.opcode == GPU7_TEX_INST_SET_CUBEMAP_INDEX )
 		{

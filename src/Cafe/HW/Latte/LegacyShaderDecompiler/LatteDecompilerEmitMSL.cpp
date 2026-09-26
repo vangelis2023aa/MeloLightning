@@ -2699,19 +2699,29 @@ static void _emitTEXGetTextureResInfoCode(LatteDecompilerShaderContext* shaderCo
 	else
 	{
     	auto texDim = shaderContext->shader->textureUnitDim[texInstruction->textureFetch.textureIndex];
+    	sint32 texIndex = texInstruction->textureFetch.textureIndex;
+
+    	// RESINFO must return the guest's NATIVE texture dimensions. get_width()/get_height() return
+    	// the actual (possibly resolution-overwritten / MetalFX-reduced) backing size, so divide by
+    	// tex{}Scale (= effective/native) to recover native. tex{}Scale is 1.0 when there is no
+    	// resolution overwrite, making this byte-identical to the raw dimensions at native res / OFF.
+    	// This keeps textureSize()-derived texel sizes (e.g. 1.0/width in water refraction) consistent
+    	// with the native-space fragcoord and texelFetch paths, avoiding resolution-dependent banding.
+    	auto nativeW = fmt::format("int(round(float(tex{}.get_width()) / supportBuffer.tex{}Scale.x))", texIndex, texIndex);
+    	auto nativeH = fmt::format("int(round(float(tex{}.get_height()) / supportBuffer.tex{}Scale.y))", texIndex, texIndex);
 
     	if (texDim == Latte::E_DIM::DIM_1D)
-    		src->addFmt(" = int4(tex{}.get_width(), 1, 1, 1).", texInstruction->textureFetch.textureIndex);
+    		src->addFmt(" = int4({}, 1, 1, 1).", nativeW);
     	else if (texDim == Latte::E_DIM::DIM_1D_ARRAY)
-    		src->addFmt(" = int4(tex{}.get_width(), tex{}.get_array_size(), 1, 1).", texInstruction->textureFetch.textureIndex, texInstruction->textureFetch.textureIndex);
+    		src->addFmt(" = int4({}, tex{}.get_array_size(), 1, 1).", nativeW, texIndex);
     	else if (texDim == Latte::E_DIM::DIM_2D || texDim == Latte::E_DIM::DIM_2D_MSAA)
-    		src->addFmt(" = int4(tex{}.get_width(), tex{}.get_height(), 1, 1).", texInstruction->textureFetch.textureIndex, texInstruction->textureFetch.textureIndex);
+    		src->addFmt(" = int4({}, {}, 1, 1).", nativeW, nativeH);
     	else if (texDim == Latte::E_DIM::DIM_2D_ARRAY)
-    		src->addFmt(" = int4(tex{}.get_width(), tex{}.get_height(), tex{}.get_array_size(), 1).", texInstruction->textureFetch.textureIndex, texInstruction->textureFetch.textureIndex, texInstruction->textureFetch.textureIndex);
+    		src->addFmt(" = int4({}, {}, tex{}.get_array_size(), 1).", nativeW, nativeH, texIndex);
     	else
     	{
     		cemu_assert_debug(false);
-    		src->addFmt(" = int4(tex{}.get_width(), tex{}.get_height(), 1, 1).", texInstruction->textureFetch.textureIndex, texInstruction->textureFetch.textureIndex);
+    		src->addFmt(" = int4({}, {}, 1, 1).", nativeW, nativeH);
     	}
 	}
 
