@@ -73,7 +73,9 @@ struct SettingsView: View {
     @AppStorage("screenLayout") private var screenLayout = ScreenLayout.initialValue
     
     @State private var showingEmulatedDevices = false
-    
+    @State private var experimentalPerfExpanded = false
+    @State private var experimentalGraphicsExpanded = false
+
     var body: some View {
         NavigationStack {
             Form {
@@ -287,6 +289,7 @@ struct SettingsView: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
 
+                    DisclosureGroup("Show options", isExpanded: $experimentalPerfExpanded) {
                     VStack(alignment: .leading, spacing: 4) {
                         Toggle("Aggressive GPU Wait Backoff", isOn: configManager.experimentalAggressiveGpuWait)
                         Text("When the CPU is stalled waiting on the GPU (fence and semaphore waits), let the waiting thread sleep sooner instead of busy-spinning a core. May reduce heat while GPU-bound; can add a little CPU–GPU latency in heavily GPU-bound scenes.")
@@ -374,6 +377,7 @@ struct SettingsView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
+                    }
                 } header: {
                     Text("Experimental Performance")
                 } footer: {
@@ -386,6 +390,7 @@ struct SettingsView: View {
                             .font(.footnote)
                             .foregroundStyle(.secondary)
 
+                        DisclosureGroup("Show options", isExpanded: $experimentalGraphicsExpanded) {
                         VStack(alignment: .leading, spacing: 4) {
                             Toggle("Enable MetalFX Upscaling", isOn: configManager.experimentalMetalFXEnable)
                             Text("Master switch. When off, the renderer behaves exactly as normal — native resolution, no scaler, no extra GPU resources. When on, the game renders at the resolution below and MetalFX upscales it to your display.")
@@ -438,6 +443,7 @@ struct SettingsView: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
+                    }
                     } header: {
                         Text("Experimental Graphics")
                     } footer: {
