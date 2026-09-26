@@ -338,6 +338,13 @@ struct SettingsView: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Toggle("Skip Redundant Surface-Copy Loads", isOn: configManager.experimentalSurfaceCopyDestDontCare)
+                            Text("Metal only. When a surface copy completely overwrites its destination, skip loading the destination's old pixels first. Saves memory bandwidth and heat on the GPU. Partial copies are unaffected. If it misbehaves it can cause momentary garbage in copied surfaces.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 } header: {
                     Text("Experimental Performance")

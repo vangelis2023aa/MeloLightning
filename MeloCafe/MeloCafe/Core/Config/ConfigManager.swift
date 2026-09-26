@@ -167,6 +167,15 @@ class ConfigManager: ObservableObject {
         }
     }
 
+    var experimentalSurfaceCopyDestDontCare: Binding<Bool> {
+        Binding {
+            self.config.experimentalSurfaceCopyDestDontCare
+        } set: {
+            self.config.experimentalSurfaceCopyDestDontCare = $0
+            self.objectWillChange.send()
+        }
+    }
+
     var experimentalAudioBufferBlocks: Binding<Int> {
         Binding {
             Int(self.config.experimentalAudioBufferBlocks)

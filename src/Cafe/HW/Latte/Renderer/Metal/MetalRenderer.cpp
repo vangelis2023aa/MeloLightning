@@ -1279,7 +1279,23 @@ void MetalRenderer::surfaceCopy_copySurfaceWithFormatConversion(LatteTexture* so
     auto sourceView = static_cast<LatteTextureViewMtl*>(sourceTexture->GetOrCreateView(Latte::E_DIM::DIM_2D, sourceTexture->format, srcMip, 1, srcSlice, 1));
     auto destinationTextureMtl = static_cast<LatteTextureMtl*>(destinationTexture);
     MTL::Texture* destinationMtl = destinationTextureMtl->GetTexture();
-    
+
+    // Experimental (default OFF): when this surface copy fully covers the destination mip/slice, the
+    // destination's previous contents are entirely overwritten by the copy, so loading them into tile
+    // memory first is wasted bandwidth on a tile-based GPU. In that case use LoadActionDontCare for the
+    // fully-written attachment (color, or depth). A partial copy keeps LoadActionLoad so the untouched
+    // region is preserved. The stencil attachment (if any) is not written by the copy shader, so it
+    // always keeps LoadActionLoad+StoreActionStore to preserve its contents. With the toggle off this is
+    // exactly the original behavior (LoadActionLoad).
+    MTL::LoadAction destLoadAction = MTL::LoadActionLoad;
+    if (ActiveSettings::ExperimentalSurfaceCopyDestDontCare())
+    {
+        sint32 dstEffectiveWidth, dstEffectiveHeight;
+        destinationTexture->GetEffectiveSize(dstEffectiveWidth, dstEffectiveHeight, dstMip);
+        if (effectiveCopyWidth >= dstEffectiveWidth && effectiveCopyHeight >= dstEffectiveHeight)
+            destLoadAction = MTL::LoadActionDontCare;
+    }
+
     NS_STACK_SCOPED MTL::RenderPassDescriptor* renderPassDescriptor = MTL::RenderPassDescriptor::alloc()->init();
     MTL::RenderPipelineState* pipeline = nullptr;
     if (destinationTexture->isDepth)
@@ -1289,7 +1305,7 @@ void MetalRenderer::surfaceCopy_copySurfaceWithFormatConversion(LatteTexture* so
         depthAttachment->setTexture(destinationMtl);
         depthAttachment->setLevel(dstMip);
         depthAttachment->setSlice(dstSlice);
-        depthAttachment->setLoadAction(MTL::LoadActionLoad);
+        depthAttachment->setLoadAction(destLoadAction);
         depthAttachment->setStoreAction(MTL::StoreActionStore);
         
         if (formatInfo.hasStencil)
@@ -1321,7 +1337,7 @@ void MetalRenderer::surfaceCopy_copySurfaceWithFormatConversion(LatteTexture* so
         colorAttachment->setTexture(destinationMtl);
         colorAttachment->setLevel(dstMip);
         colorAttachment->setSlice(dstSlice);
-        colorAttachment->setLoadAction(MTL::LoadActionLoad);
+        colorAttachment->setLoadAction(destLoadAction);
         colorAttachment->setStoreAction(MTL::StoreActionStore);
         
         auto& cachedPipeline = m_copyDepthToColorPipelines[pixelFormat];

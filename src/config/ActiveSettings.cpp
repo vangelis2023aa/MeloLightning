@@ -147,6 +147,11 @@ bool ActiveSettings::ExperimentalExtendedCommitThreshold()
 	return GetConfig().experimental_extended_commit_threshold;
 }
 
+bool ActiveSettings::ExperimentalSurfaceCopyDestDontCare()
+{
+	return GetConfig().experimental_surfacecopy_dest_dontcare;
+}
+
 bool ActiveSettings::ExperimentalMetalFXEnable()
 {
 	return GetConfig().experimental_metalfx_enable;
