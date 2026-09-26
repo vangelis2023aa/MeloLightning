@@ -130,6 +130,7 @@ typedef NS_ENUM(NSInteger, ObjCPrecompiledShaderOption) {
 @property (nonatomic) BOOL experimentalSamplerCacheFastPath;
 @property (nonatomic) BOOL experimentalExtendedCommitThreshold;
 @property (nonatomic) BOOL experimentalSurfaceCopyDestDontCare;
+@property (nonatomic) BOOL experimentalPresentDontCare;
 @property (nonatomic) int experimentalAudioBufferBlocks;
 @property (nonatomic) int experimentalAudioAntiClip;
 

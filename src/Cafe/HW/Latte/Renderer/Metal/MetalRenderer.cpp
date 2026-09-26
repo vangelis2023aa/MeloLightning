@@ -717,7 +717,19 @@ void MetalRenderer::DrawBackbufferQuad(LatteTextureView* texView, RendererOutput
     auto colorAttachment = renderPassDescriptor->colorAttachments()->object(0);
     colorAttachment->setTexture(layer.GetDrawable()->texture());
     colorAttachment->setClearColor(MTL::ClearColor(0.0, 0.0, 0.0, 1.0));
-    colorAttachment->setLoadAction(clearBackground ? MTL::LoadActionClear : MTL::LoadActionLoad);
+    // Experimental: when the output blit covers the entire drawable (clearBackground == false, i.e.
+    // the image fills the screen), the full-screen triangle overwrites every pixel, so loading the
+    // freshly-acquired drawable's undefined contents is pure wasted TBDR tile-load bandwidth. Use
+    // DontCare in that case. Letterboxed output (clearBackground == true) still clears its borders.
+    // Default OFF => unchanged LoadActionLoad, byte-identical present.
+    MTL::LoadAction presentLoadAction;
+    if (clearBackground)
+        presentLoadAction = MTL::LoadActionClear;
+    else if (ActiveSettings::ExperimentalPresentDontCare())
+        presentLoadAction = MTL::LoadActionDontCare;
+    else
+        presentLoadAction = MTL::LoadActionLoad;
+    colorAttachment->setLoadAction(presentLoadAction);
     colorAttachment->setStoreAction(MTL::StoreActionStore);
 
     auto renderCommandEncoder = GetTemporaryRenderCommandEncoder(renderPassDescriptor);

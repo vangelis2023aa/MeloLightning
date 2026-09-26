@@ -176,6 +176,15 @@ class ConfigManager: ObservableObject {
         }
     }
 
+    var experimentalPresentDontCare: Binding<Bool> {
+        Binding {
+            self.config.experimentalPresentDontCare
+        } set: {
+            self.config.experimentalPresentDontCare = $0
+            self.objectWillChange.send()
+        }
+    }
+
     var experimentalAudioBufferBlocks: Binding<Int> {
         Binding {
             Int(self.config.experimentalAudioBufferBlocks)

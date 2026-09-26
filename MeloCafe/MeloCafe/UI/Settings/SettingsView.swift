@@ -345,6 +345,13 @@ struct SettingsView: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Toggle("Skip Redundant Present Load", isOn: configManager.experimentalPresentDontCare)
+                            Text("Metal only. The final image is drawn edge-to-edge over the whole screen every frame, so skip loading the previous frame's pixels into the display's tile memory first. Saves memory bandwidth and heat on the GPU. Letterboxed output still clears its borders. If it misbehaves it can cause momentary garbage at the screen edges.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 } header: {
                     Text("Experimental Performance")

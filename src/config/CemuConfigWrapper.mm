@@ -174,6 +174,9 @@ static CPUMode toCPUMode(ObjCCPUMode mode) {
 - (BOOL)experimentalSurfaceCopyDestDontCare { return GetConfig().experimental_surfacecopy_dest_dontcare.GetValue(); }
 - (void)setExperimentalSurfaceCopyDestDontCare:(BOOL)v { GetConfig().experimental_surfacecopy_dest_dontcare = v; autoSave(); }
 
+- (BOOL)experimentalPresentDontCare { return GetConfig().experimental_present_dontcare.GetValue(); }
+- (void)setExperimentalPresentDontCare:(BOOL)v { GetConfig().experimental_present_dontcare = v; autoSave(); }
+
 - (int)experimentalAudioBufferBlocks       { return GetConfig().experimental_audio_buffer_blocks.GetValue(); }
 - (void)setExperimentalAudioBufferBlocks:(int)v { GetConfig().experimental_audio_buffer_blocks = v; autoSave(); }
 
