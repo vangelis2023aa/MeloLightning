@@ -14,6 +14,10 @@ public:
     uint32 m_snapshotReuses = 0;
     uint32 m_argumentBufferEncodes = 0;
     uint32 m_argumentBufferReuses = 0;
+    // Developer-only fragmentation counters (see AppendOverlayDebugInfo). Observation only.
+    uint32 m_drawCalls = 0;      // guest draws submitted to draw_execute this frame
+    uint32 m_drawPassBegins = 0; // CP continuous-draw-pass begins this frame (fragmentation numerator)
+    uint32 m_snapshotMisses = 0; // snapshot cache misses (re-copies) this frame
 
     MetalPerformanceMonitor() = default;
     ~MetalPerformanceMonitor() = default;
@@ -30,5 +34,8 @@ public:
         m_snapshotReuses = 0;
         m_argumentBufferEncodes = 0;
         m_argumentBufferReuses = 0;
+        m_drawCalls = 0;
+        m_drawPassBegins = 0;
+        m_snapshotMisses = 0;
     }
 };

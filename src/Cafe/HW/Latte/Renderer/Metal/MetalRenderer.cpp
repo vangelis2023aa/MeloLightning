@@ -951,6 +951,15 @@ void MetalRenderer::AppendOverlayDebugInfo()
     ImGui::Text("Snapshot uploads           %llu KB (reuses: %u)", static_cast<unsigned long long>(m_performanceMonitor.m_snapshotBytes / 1024), m_performanceMonitor.m_snapshotReuses);
     ImGui::Text("Argument buffer encodes    %u (reuses: %u)", m_performanceMonitor.m_argumentBufferEncodes, m_performanceMonitor.m_argumentBufferReuses);
 
+    ImGui::Text("--- Pass fragmentation (per frame) ---");
+    ImGui::Text("Draw calls                 %u", m_performanceMonitor.m_drawCalls);
+    ImGui::Text("Draw-pass begins           %u", m_performanceMonitor.m_drawPassBegins);
+    {
+        const float drawsPerPass = m_performanceMonitor.m_drawPassBegins ? ((float)m_performanceMonitor.m_drawCalls / (float)m_performanceMonitor.m_drawPassBegins) : 0.0f;
+        ImGui::Text("Draws per pass             %.2f", drawsPerPass);
+    }
+    ImGui::Text("Snapshot misses            %u", m_performanceMonitor.m_snapshotMisses);
+
     ImGui::Text("--- Cache debug info ---");
 
     uint32 bufferCacheHeapSize = 0;
@@ -1700,6 +1709,8 @@ void MetalRenderer::draw_beginSequence()
 {
     m_state.m_skipDrawSequence = false;
 
+    m_performanceMonitor.m_drawPassBegins++;
+
     // New draw sequence = new CP draw pass boundary: any context/resource/sampler write since the
     // last pass ended it, so advance the per-pass generation. Experimental state-cache fast-paths
     // use this token to detect that nothing feeding their hashes has changed within a pass.
@@ -1753,6 +1764,8 @@ void MetalRenderer::draw_beginSequence()
 
 void MetalRenderer::draw_execute(uint32 baseVertex, uint32 baseInstance, uint32 instanceCount, uint32 count, MPTR indexDataMPTR, Latte::LATTE_VGT_DMA_INDEX_TYPE::E_INDEX_TYPE indexType, bool isFirst)
 {
+    m_performanceMonitor.m_drawCalls++;
+
     if (m_state.m_skipDrawSequence)
     {
         LatteGPUState.drawCallCounter++;

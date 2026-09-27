@@ -55,6 +55,7 @@ MetalSynchronizedHeapAllocator::AllocatorReservation* MetalMemoryManager::GetCac
     std::memcpy(snapshot.allocation->memPtr + firstByte, source + firstByte, copySize);
     m_snapshotAllocator.FlushReservation(snapshot.allocation);
     m_mtlr->GetPerformanceMonitor().m_snapshotBytes += copySize;
+    m_mtlr->GetPerformanceMonitor().m_snapshotMisses++;
     return snapshot.allocation;
 }
 
