@@ -230,6 +230,15 @@ class ConfigManager: ObservableObject {
         }
     }
 
+    var experimentalSuppressRedundantContextReg: Binding<Bool> {
+        Binding {
+            self.config.experimentalSuppressRedundantContextReg
+        } set: {
+            self.config.experimentalSuppressRedundantContextReg = $0
+            self.objectWillChange.send()
+        }
+    }
+
     var experimentalDecodeCache: Binding<Bool> {
         Binding {
             self.config.experimentalDecodeCache

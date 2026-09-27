@@ -418,6 +418,13 @@ struct SettingsView: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Toggle("Skip No-Op State-Change Passes", isOn: configManager.experimentalSuppressRedundantContextReg)
+                            Text("Metal only. Games constantly re-send GPU state settings, and normally each one ends the current run of draws and starts a fresh render pass — even when the value being written is identical to what is already there and changes nothing. This keeps the current pass open across those provable no-op writes (the value is still applied exactly as before, so nothing about the emulated state changes; only the redundant pass break is skipped). Fewer passes means less per-pass setup work on the CPU each time a pass starts, which can help when the game is CPU-bound and can lower heat. Experimental: if a state write that actually affected rendering were ever merged by mistake it could cause graphical glitches or gameplay problems — turn it off if you see anything wrong.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                     }
                 } header: {

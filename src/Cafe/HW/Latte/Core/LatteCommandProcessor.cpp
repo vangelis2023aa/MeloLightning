@@ -67,6 +67,13 @@ public:
 		return m_drawPassActive;
 	}
 
+	// Experimental: keep the draw pass open across a provably redundant IT_SET_CONTEXT_REG write
+	// (read once per pass entry; OFF => today's behavior). See LatteCP_isContextRegWriteRedundant.
+	bool suppressRedundantContextReg() const
+	{
+		return m_suppressRedundantContextReg;
+	}
+
 	void beginDrawPass()
 	{
 		m_drawPassActive = true;
@@ -141,6 +148,7 @@ private:
 	bool m_isFirstDraw{false};
 	bool m_vertexBufferChanged{ false };
 	bool m_uniformBufferChanged{ false };
+	const bool m_suppressRedundantContextReg{ ActiveSettings::ExperimentalSuppressRedundantContextReg() };
 	boost::container::small_vector<CmdQueuePos, 4> m_queuePosStack;
 };
 
@@ -344,6 +352,35 @@ void LatteCP_itSetRegistersGeneric_handleSpecialRanges(uint32 registerStartIndex
 			}
 		}
 	}
+}
+
+// Experimental (experimental_suppress_redundant_context_reg): returns true iff this IT_SET_CONTEXT_REG
+// packet writes only words that already equal the current contextRegister[] contents AND its range does
+// not cover mmSQ_VTX_SEMANTIC_CLEAR. In that case applying the packet leaves every guest-visible context
+// register byte-identical (a provable no-op beyond the store itself), so the continuous draw pass can be
+// kept open instead of ended without changing any rendering. The write is still applied unconditionally
+// by the normal register path, so contextRegister[] and any state-shadow memory are unaffected either way;
+// this only decides whether the redundant Metal render-pass boundary is skipped. Any changed word, or a
+// range covering the semantic-clear side effect, returns false and the pass ends exactly as before.
+// The compared range [registerIndex, registerIndex + (nWords-1)) is identical to the range the write
+// touches, so this read introduces no out-of-bounds access the write did not already have.
+inline bool LatteCP_isContextRegWriteRedundant(LatteCMDPtr cmdData, uint32 nWords)
+{
+	uint32 registerOffset = (uint32)cmdData[0];
+	uint32 registerIndex = LATTE_REG_BASE_CONTEXT + registerOffset;
+	uint32 registerStartIndex = registerIndex;
+	uint32 registerEndIndex = registerStartIndex + nWords; // matches LatteCP_itSetRegistersGeneric's convention
+	if (registerStartIndex <= mmSQ_VTX_SEMANTIC_CLEAR && registerEndIndex >= mmSQ_VTX_SEMANTIC_CLEAR)
+		return false; // covers the semantic-clear side effect -> never a no-op
+	// word[0] is the register offset; word[1..nWords-1] are the nWords-1 data words (see the --nWords loop).
+	uint32 dataWordCount = nWords - 1;
+	const uint32* currentReg = LatteGPUState.contextRegister + registerIndex;
+	for (uint32 i = 0; i < dataWordCount; i++)
+	{
+		if ((uint32)cmdData[1 + i] != currentReg[i])
+			return false; // a written word differs from the resident value -> not redundant
+	}
+	return true;
 }
 
 template<uint32 TRegisterBase>
@@ -1254,6 +1291,15 @@ void LatteCP_processCommandBuffer_continuousDrawPass(DrawPassContext& drawPassCt
 				}
 				case IT_SET_CONTEXT_REG:
 				{
+					if (drawPassCtx.suppressRedundantContextReg() && LatteCP_isContextRegWriteRedundant(cmdData, nWords))
+					{
+						// Provable no-op context-reg write: apply it exactly as the generic parser would
+						// (LatteGPUState.contextRegister[] + any state-shadow memory stay byte-identical),
+						// but keep the current draw pass open instead of ending it. Nothing feeding the
+						// render state changed, so no pass boundary is needed here.
+						LatteCP_itSetRegistersGeneric<LATTE_REG_BASE_CONTEXT>(cmdData, nWords);
+						break;
+					}
 					drawPassCtx.endDrawPass();
 					drawPassCtx.PushCurrentCommandQueuePos(cmdBeforeCommand, cmdStart, cmdEnd);
 					return;

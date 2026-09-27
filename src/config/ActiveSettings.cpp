@@ -198,6 +198,11 @@ bool ActiveSettings::ExperimentalTextureViewFastPath()
 	return GetConfig().experimental_texture_view_fast_path;
 }
 
+bool ActiveSettings::ExperimentalSuppressRedundantContextReg()
+{
+	return GetConfig().experimental_suppress_redundant_context_reg;
+}
+
 bool ActiveSettings::ExperimentalDecodeCache()
 {
 	return GetConfig().experimental_decode_cache;

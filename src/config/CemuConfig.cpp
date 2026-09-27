@@ -305,6 +305,7 @@ XMLConfigParser CemuConfig::Load(XMLConfigParser& parser)
 	experimental_commit_on_cp_idle = experimental.get("CommitOnCpIdle", false);
 	experimental_extended_thread_quantum = experimental.get("ExtendedThreadQuantum", false);
 	experimental_texture_view_fast_path = experimental.get("TextureViewFastPath", false);
+	experimental_suppress_redundant_context_reg = experimental.get("SuppressRedundantContextReg", false);
 	experimental_decode_cache = experimental.get("DecodeCache", false);
 	experimental_persistent_texture_cache = experimental.get("PersistentTextureCache", false);
 	experimental_worker_texture_decode = experimental.get("WorkerTextureDecode", false);
@@ -511,6 +512,7 @@ XMLConfigParser CemuConfig::Save(XMLConfigParser& parser)
 	experimental.set("CommitOnCpIdle", experimental_commit_on_cp_idle.GetValue());
 	experimental.set("ExtendedThreadQuantum", experimental_extended_thread_quantum.GetValue());
 	experimental.set("TextureViewFastPath", experimental_texture_view_fast_path.GetValue());
+	experimental.set("SuppressRedundantContextReg", experimental_suppress_redundant_context_reg.GetValue());
 	experimental.set("DecodeCache", experimental_decode_cache.GetValue());
 	experimental.set("PersistentTextureCache", experimental_persistent_texture_cache.GetValue());
 	experimental.set("WorkerTextureDecode", experimental_worker_texture_decode.GetValue());

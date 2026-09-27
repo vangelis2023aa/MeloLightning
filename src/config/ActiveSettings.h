@@ -144,6 +144,7 @@ public:
 	[[nodiscard]] static bool ExperimentalCommitOnCpIdle();
 	[[nodiscard]] static bool ExperimentalExtendedThreadQuantum();
 	[[nodiscard]] static bool ExperimentalTextureViewFastPath();
+	[[nodiscard]] static bool ExperimentalSuppressRedundantContextReg();
 	[[nodiscard]] static bool ExperimentalDecodeCache();
 	[[nodiscard]] static bool ExperimentalPersistentTextureCache();
 	[[nodiscard]] static bool ExperimentalWorkerTextureDecode();

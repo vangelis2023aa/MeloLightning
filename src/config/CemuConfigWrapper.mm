@@ -186,6 +186,8 @@ static CPUMode toCPUMode(ObjCCPUMode mode) {
 - (void)setExperimentalExtendedThreadQuantum:(BOOL)v { GetConfig().experimental_extended_thread_quantum = v; autoSave(); }
 - (BOOL)experimentalTextureViewFastPath { return GetConfig().experimental_texture_view_fast_path.GetValue(); }
 - (void)setExperimentalTextureViewFastPath:(BOOL)v { GetConfig().experimental_texture_view_fast_path = v; autoSave(); }
+- (BOOL)experimentalSuppressRedundantContextReg { return GetConfig().experimental_suppress_redundant_context_reg.GetValue(); }
+- (void)setExperimentalSuppressRedundantContextReg:(BOOL)v { GetConfig().experimental_suppress_redundant_context_reg = v; autoSave(); }
 - (BOOL)experimentalDecodeCache { return GetConfig().experimental_decode_cache.GetValue(); }
 - (void)setExperimentalDecodeCache:(BOOL)v { GetConfig().experimental_decode_cache = v; autoSave(); }
 - (BOOL)experimentalPersistentTextureCache { return GetConfig().experimental_persistent_texture_cache.GetValue(); }
