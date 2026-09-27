@@ -158,6 +158,11 @@ bool ActiveSettings::ExperimentalSamplerCacheFastPath()
 	return GetConfig().experimental_sampler_cache_fast_path;
 }
 
+bool ActiveSettings::ExperimentalPassTextureFastPath()
+{
+	return GetConfig().experimental_pass_texture_fastpath;
+}
+
 bool ActiveSettings::ExperimentalExtendedCommitThreshold()
 {
 	return GetConfig().experimental_extended_commit_threshold;

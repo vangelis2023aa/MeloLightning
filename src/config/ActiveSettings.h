@@ -136,6 +136,7 @@ public:
 	[[nodiscard]] static bool ExperimentalPpcBlockLinking();
 	[[nodiscard]] static bool ExperimentalPipelineCacheFastPath();
 	[[nodiscard]] static bool ExperimentalSamplerCacheFastPath();
+	[[nodiscard]] static bool ExperimentalPassTextureFastPath();
 	[[nodiscard]] static bool ExperimentalExtendedCommitThreshold();
 	[[nodiscard]] static bool ExperimentalSurfaceCopyDestDontCare();
 	[[nodiscard]] static bool ExperimentalPresentDontCare();

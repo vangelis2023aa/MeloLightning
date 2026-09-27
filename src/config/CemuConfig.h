@@ -542,6 +542,7 @@ struct CemuConfig
 	ConfigValue<bool> experimental_ppc_block_linking{ false };       // PPC interpreter: link basic blocks to skip per-block hash lookup
 	ConfigValue<bool> experimental_pipeline_cache_fast_path{ false };// Metal: per-draw-pass pipeline + depth-stencil hash memoization
 	ConfigValue<bool> experimental_sampler_cache_fast_path{ false }; // Metal: per-draw-pass sampler-state hash memoization
+	ConfigValue<bool> experimental_pass_texture_fastpath{ false };   // Metal: per-draw-pass texture-binding fast path - reuse the MTL::Texture* resolved for a (stage,unit) earlier in the same draw pass instead of re-running the null-texture selection + swizzle-view resolve each draw
 	ConfigValue<bool> experimental_extended_commit_threshold{ false };// Metal: raise command-buffer commit threshold (larger batches)
 	ConfigValue<bool> experimental_surfacecopy_dest_dontcare{ false }; // Metal: skip loading a surface-copy destination that the copy fully overwrites (TBDR bandwidth)
 	ConfigValue<bool> experimental_present_dontcare{ false };        // Metal: skip loading the drawable in the full-screen present pass that fully overwrites it (TBDR bandwidth)

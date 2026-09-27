@@ -571,6 +571,7 @@ private:
 	class MetalPipelineCache* m_pipelineCache;
 	class MetalDepthStencilCache* m_depthStencilCache;
 	class MetalSamplerCache* m_samplerCache;
+	class MetalTextureBindCache* m_textureBindCache;
 
 	// Pipelines
 	MTL::RenderPipelineDescriptor* m_copyDepthToColorDesc;

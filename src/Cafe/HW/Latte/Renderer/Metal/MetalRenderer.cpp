@@ -9,6 +9,7 @@
 #include "Cafe/HW/Latte/Renderer/Metal/MetalPipelineCache.h"
 #include "Cafe/HW/Latte/Renderer/Metal/MetalDepthStencilCache.h"
 #include "Cafe/HW/Latte/Renderer/Metal/MetalSamplerCache.h"
+#include "Cafe/HW/Latte/Renderer/Metal/MetalTextureBindCache.h"
 #include "Cafe/HW/Latte/Renderer/Metal/MetalFXUpscaler.h"
 #include "Cafe/HW/Latte/Renderer/Metal/LatteTextureReadbackMtl.h"
 #include "Cafe/HW/Latte/Renderer/Metal/MetalQuery.h"
@@ -233,6 +234,7 @@ MetalRenderer::MetalRenderer()
     m_pipelineCache = new MetalPipelineCache(this);
     m_depthStencilCache = new MetalDepthStencilCache(this);
     m_samplerCache = new MetalSamplerCache(this);
+    m_textureBindCache = new MetalTextureBindCache();
 
     // Lower the commit treshold when buffer cache needs reduced latency
     if (m_memoryManager->NeedsReducedLatency())
@@ -391,6 +393,7 @@ MetalRenderer::~MetalRenderer()
     delete m_pipelineCache;
     delete m_depthStencilCache;
     delete m_samplerCache;
+    delete m_textureBindCache;
     delete m_memoryManager;
 
     // Experimental MetalFX: stop scaling newly-created render targets before teardown, then release
@@ -3089,6 +3092,9 @@ bool MetalRenderer::BindStageResources(MTL::RenderCommandEncoder* renderCommandE
     // Experimental per-draw-pass sampler fast-path toggle (sampled once per stage; the only OFF-path
     // cost is this atomic bool read). See MetalSamplerCache::GetPassSampler for the correctness proof.
     const bool samplerFastPathOn = ActiveSettings::ExperimentalSamplerCacheFastPath();
+    // Experimental per-draw-pass texture-binding fast-path toggle (same sampling/OFF-path story).
+    // See MetalTextureBindCache::GetPassTexture for the correctness proof.
+    const bool textureFastPathOn = ActiveSettings::ExperimentalPassTextureFastPath();
 
     for (sint32 relative_textureUnit = 0; relative_textureUnit < LATTE_NUM_MAX_TEX_UNITS; relative_textureUnit++)
     {
@@ -3171,33 +3177,45 @@ bool MetalRenderer::BindStageResources(MTL::RenderCommandEncoder* renderCommandE
                 SetSamplerState(renderCommandEncoder, mtlShaderType, sampler, samplerBinding);
         }
         
-        MTL::Texture* mtlTexture = nullptr;
-        const bool integerTexture = shader->textureIsIntegerFormat[relative_textureUnit];
-        const bool depthTexture = shader->textureUsesDepthCompare[relative_textureUnit] && IsValidDepthTextureType(textureDim);
-        MTL::Texture* nullTexture = GetNullSampledTexture(textureDim, integerTexture, depthTexture);
-        if (!textureView)
+        // Experimental per-draw-pass texture-binding fast path: the MTL::Texture* resolved for this
+        // (stage, unit) is frozen for the whole draw pass (a bind, context-reg or shader change ends
+        // the pass and bumps m_drawPassGeneration), so reuse a pointer resolved by an earlier draw in
+        // the same pass and skip the null-texture selection, the dimension checks and GetSwizzledView.
+        // A generation mismatch (or the toggle OFF) falls through to the exact original resolve and
+        // re-caches, so a wrong texture can never bind. Identical invariant/proof to the sampler fast
+        // path above; only a non-null resolve is cached (a null re-resolves cheaply each draw).
+        MTL::Texture* mtlTexture = textureFastPathOn ? m_textureBindCache->GetPassTexture(shader->shaderType, relative_textureUnit, m_drawPassGeneration) : nullptr;
+        if (!mtlTexture)
         {
-            mtlTexture = nullTexture;
-        }
-        else if (textureDim == Latte::E_DIM::DIM_1D && (textureView->dim != Latte::E_DIM::DIM_1D))
-        {
-            mtlTexture = nullTexture;
-        }
-        else if (textureDim == Latte::E_DIM::DIM_2D && (textureView->dim != Latte::E_DIM::DIM_2D && textureView->dim != Latte::E_DIM::DIM_2D_MSAA))
-        {
-            mtlTexture = nullTexture;
-        }
-        else if (textureDim != Latte::E_DIM::DIM_1D &&
-                 textureDim != Latte::E_DIM::DIM_2D &&
-                 textureView->dim != textureDim)
-        {
-            mtlTexture = nullTexture;
-        }
-        else
-        {
-            // get texture register word 0
-            uint32 word4 = LatteGPUState.contextRegister[texUnitRegIndex + 4];
-            mtlTexture = textureView->GetSwizzledView(word4);
+            const bool integerTexture = shader->textureIsIntegerFormat[relative_textureUnit];
+            const bool depthTexture = shader->textureUsesDepthCompare[relative_textureUnit] && IsValidDepthTextureType(textureDim);
+            MTL::Texture* nullTexture = GetNullSampledTexture(textureDim, integerTexture, depthTexture);
+            if (!textureView)
+            {
+                mtlTexture = nullTexture;
+            }
+            else if (textureDim == Latte::E_DIM::DIM_1D && (textureView->dim != Latte::E_DIM::DIM_1D))
+            {
+                mtlTexture = nullTexture;
+            }
+            else if (textureDim == Latte::E_DIM::DIM_2D && (textureView->dim != Latte::E_DIM::DIM_2D && textureView->dim != Latte::E_DIM::DIM_2D_MSAA))
+            {
+                mtlTexture = nullTexture;
+            }
+            else if (textureDim != Latte::E_DIM::DIM_1D &&
+                     textureDim != Latte::E_DIM::DIM_2D &&
+                     textureView->dim != textureDim)
+            {
+                mtlTexture = nullTexture;
+            }
+            else
+            {
+                // get texture register word 0
+                uint32 word4 = LatteGPUState.contextRegister[texUnitRegIndex + 4];
+                mtlTexture = textureView->GetSwizzledView(word4);
+            }
+            if (textureFastPathOn && mtlTexture)
+                m_textureBindCache->SetPassTexture(shader->shaderType, relative_textureUnit, m_drawPassGeneration, mtlTexture);
         }
         
         if (argumentEncoder)

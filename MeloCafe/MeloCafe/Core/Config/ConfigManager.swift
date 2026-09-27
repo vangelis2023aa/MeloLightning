@@ -158,6 +158,15 @@ class ConfigManager: ObservableObject {
         }
     }
 
+    var experimentalPassTextureFastPath: Binding<Bool> {
+        Binding {
+            self.config.experimentalPassTextureFastPath
+        } set: {
+            self.config.experimentalPassTextureFastPath = $0
+            self.objectWillChange.send()
+        }
+    }
+
     var experimentalExtendedCommitThreshold: Binding<Bool> {
         Binding {
             self.config.experimentalExtendedCommitThreshold

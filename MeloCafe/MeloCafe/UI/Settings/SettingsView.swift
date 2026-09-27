@@ -336,6 +336,13 @@ struct SettingsView: View {
                         }
 
                         VStack(alignment: .leading, spacing: 4) {
+                            Toggle("Texture Binding Fast-Path", isOn: configManager.experimentalPassTextureFastPath)
+                            Text("Metal only. Within a single draw pass the texture bound to each slot cannot change, so reuse the texture resolved earlier in the pass instead of re-selecting and re-swizzling it for every draw. Cuts per-draw CPU work in the same way as the sampler fast-path; if it misbehaves it can cause momentary wrong textures — turn it off if you see that.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        VStack(alignment: .leading, spacing: 4) {
                             Toggle("Extended Command Batching", isOn: configManager.experimentalExtendedCommitThreshold)
                             Text("Metal only. Submit larger batches of GPU work per command buffer, reducing how often work is flushed to the GPU. Rendering is unchanged, but larger batches raise GPU latency and memory use, which can shift frame pacing or, in extreme scenes, trigger a GPU timeout.")
                                 .font(.caption)
