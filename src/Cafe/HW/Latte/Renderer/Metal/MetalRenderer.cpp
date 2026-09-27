@@ -2827,6 +2827,21 @@ bool MetalRenderer::AcquireDrawable(bool mainWindow)
         layer.GetLayer()->setPixelFormat(pixelFormat);
     m_state.m_usesSRGB = latteBufferUsesSRGB;
 
+    if (layer.AcquireDrawable())
+        return true;
+
+    // Drawable-exhaustion recovery (always on): nextDrawable() returned nil, meaning every drawable
+    // in CAMetalLayer's small pool is still owned by an in-flight (presented) command buffer. If we
+    // just keep returning false, the caller (BeginFrame/SwapBuffer) skips presenting forever - and
+    // because presentation is what recycles drawables, the pool never refills, so the skip becomes
+    // permanent. Combined with the guest parking in GX2WaitTimeStamp on the then-frozen retire
+    // marker, that is the aggressive-frame-pacing freeze. Reap any command buffers that have since
+    // completed (dropping our references to the drawables they presented, so CoreAnimation can
+    // recycle them) and retry exactly once. ProcessFinishedCommandBuffers() only removes buffers
+    // whose status() is Completed/Error, so no in-flight buffer is freed - this is safe. Still nil =>
+    // skip just this frame and return to the loop (the sim-vsync clock keeps advancing); we try again
+    // next frame instead of blocking.
+    ProcessFinishedCommandBuffers();
     return layer.AcquireDrawable();
 }
 

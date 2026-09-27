@@ -1,5 +1,6 @@
 #include "Cafe/OS/common/OSCommon.h"
 #include "Cafe/OS/libs/TCL/TCL.h"
+#include "Cafe/OS/libs/coreinit/coreinit_Time.h"
 #include "config/ActiveSettings.h"
 
 #include "HW/Latte/Core/LattePM4.h"
@@ -47,13 +48,28 @@ namespace TCL
 	{
 		if (id == TCLTimestampId::TIMESTAMP_LAST_BUFFER_RETIRED)
 		{
-			while ( true )
+			// The caller passes a timeout in Espresso timer ticks (GX2WaitTimeStamp uses
+			// Espresso::TIMER_CLOCK*60, i.e. ~60s, and its comment says it "timeout[s] after 60
+			// seconds"). The original implementation DROPPED that timeout and blocked on a plain
+			// OSWaitEvent(), so a guest thread parked here waited forever if the GPU never advanced
+			// the retire marker (e.g. presentation stalled). That permanent park is the guest-side
+			// half of the aggressive-frame-pacing freeze. Honor the timeout instead: wake in bounded
+			// slices to re-check the marker and give up once the tick deadline passes. OSGetTime()
+			// and `timeout` are both in timer ticks, so they compare directly with no conversion; the
+			// per-wake slice is a small fixed nanosecond value passed to OSWaitEventWithTimeout.
+			const uint64 startTick = coreinit::OSGetTime();
+			constexpr uint64 kWaitSliceNs = 50ull * 1000ull * 1000ull; // 50ms re-check cadence while parked
+			while (true)
 			{
 				stdx::atomic_ref<uint64be> retireTimestamp(s_tclStatePPC->gpuRetireMarker);
 				uint64 currentTimestamp = retireTimestamp.load();
 				if (currentTimestamp >= waitTs)
 					return 0;
-				coreinit::OSWaitEvent(s_updateRetirementEvent.GetPtr());
+				// timeout == 0 keeps the original unbounded-wait intent (no in-tree caller passes 0),
+				// but still via bounded slices so it can never permanently park.
+				if (timeout != 0 && (coreinit::OSGetTime() - startTick) >= timeout)
+					return 0; // timed out; GX2WaitTimeStamp ignores the result and proceeds
+				coreinit::OSWaitEventWithTimeout(s_updateRetirementEvent.GetPtr(), kWaitSliceNs);
 			}
 		}
 		else

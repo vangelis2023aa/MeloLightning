@@ -127,6 +127,11 @@ public:
 	// Cheap lock-free atomic reads; safe to call from GPU/CP threads.
 	[[nodiscard]] static bool ExperimentalAggressiveGpuWait();
 	[[nodiscard]] static bool ExperimentalAggressiveFramePacing();
+	// Session-only self-disable for aggressive frame pacing, set by the LatteCP flip-wait watchdog
+	// when it detects the simulated-vsync clock has stalled under the experiment. Not persisted: the
+	// user's stored setting is restored on next launch. After this is called
+	// ExperimentalAggressiveFramePacing() returns false for the rest of the session.
+	static void DisableAggressiveFramePacingForSession();
 	[[nodiscard]] static bool ExperimentalSkipRedundantResidency();
 	[[nodiscard]] static bool ExperimentalPpcBlockLinking();
 	[[nodiscard]] static bool ExperimentalPipelineCacheFastPath();

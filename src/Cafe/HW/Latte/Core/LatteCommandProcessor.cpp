@@ -1070,6 +1070,19 @@ LatteCMDPtr LatteCP_itHLEWaitForFlip(LatteCMDPtr cmd, uint32 nWords)
 	// point for on-device tuning, not a proven-optimal setting.
 	const bool aggressiveFramePacing = ActiveSettings::ExperimentalAggressiveFramePacing();
 	const uint64 kFlipSpinMarginUs = aggressiveFramePacing ? 250 : 1000;
+	// Frame-pacing watchdog (only armed when the experiment is on). LatteTiming_HandleTimedVsync()
+	// advances flipCounter from *inside* this loop, so if flipCounter has not moved after a generous
+	// wall-clock bound the simulated-vsync clock is genuinely stuck - the permanent freeze users hit
+	// with aggressive frame pacing. A real flip wait is at most one frame interval (tens of ms even
+	// at very low FPS), so 4s of no progress is unambiguous. On trip we self-disable aggressive frame
+	// pacing for the rest of the session (reverting to the known-good baseline margins) and break out
+	// so the CP can continue. The stored setting is untouched and restored on next launch. A single
+	// multi-second gap between iterations (e.g. the app was backgrounded/suspended on iOS) restarts
+	// the window so we never self-disable on resume. With the toggle off this is fully inert.
+	uint64 watchdogStartTick = 0, watchdogPrevTick = 0;
+	if (aggressiveFramePacing)
+		watchdogStartTick = watchdogPrevTick = HighResolutionTimer::now().getTick();
+	constexpr uint64 kWatchdogTimeoutUs = 4ull * 1000ull * 1000ull;
 	while (true)
 	{
 		if (currentFlipCount != LatteGPUState.flipCounter)
@@ -1102,6 +1115,20 @@ LatteCMDPtr LatteCP_itHLEWaitForFlip(LatteCMDPtr cmd, uint32 nWords)
 		_mm_pause();
 		LatteTiming_HandleTimedVsync();
 		std::this_thread::yield();
+
+		if (aggressiveFramePacing)
+		{
+			const uint64 nowW = HighResolutionTimer::now().getTick();
+			if (HighResolutionTimer::ticksToMicroseconds(nowW - watchdogPrevTick) > 1000000)
+				watchdogStartTick = nowW; // large single gap => suspended, not stalled; restart window
+			watchdogPrevTick = nowW;
+			if (HighResolutionTimer::ticksToMicroseconds(nowW - watchdogStartTick) >= kWatchdogTimeoutUs)
+			{
+				cemuLog_log(LogType::Force, "Aggressive Frame-Pacing Backoff watchdog: simulated vsync stalled >4s; disabling aggressive frame pacing for this session");
+				ActiveSettings::DisableAggressiveFramePacingForSession();
+				break;
+			}
+		}
 	}
 	return cmd;
 }

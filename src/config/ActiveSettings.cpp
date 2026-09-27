@@ -11,6 +11,12 @@
 #include "Cafe/Account/Account.h"
 #include "util/helpers/helpers.h"
 
+#include <atomic>
+
+// Session-only flag backing ActiveSettings::DisableAggressiveFramePacingForSession(). Never persisted;
+// only transitions false->true (the watchdog self-disable is one-way for the run).
+static std::atomic<bool> s_aggressiveFramePacingSelfDisabled{false};
+
 void ActiveSettings::SetPaths(bool isPortableMode,
 		const fs::path& executablePath,
 		const fs::path& userDataPath,
@@ -119,7 +125,17 @@ bool ActiveSettings::ExperimentalAggressiveGpuWait()
 
 bool ActiveSettings::ExperimentalAggressiveFramePacing()
 {
+	// Session-only override: once the frame-pacing watchdog trips (see DisableAggressiveFramePacing-
+	// ForSession) the aggressive path stays off until the app is relaunched, without touching the
+	// persisted setting. Relaxed load: this is a scheduling/backoff hint, not a correctness gate.
+	if (s_aggressiveFramePacingSelfDisabled.load(std::memory_order_relaxed))
+		return false;
 	return GetConfig().experimental_aggressive_frame_pacing;
+}
+
+void ActiveSettings::DisableAggressiveFramePacingForSession()
+{
+	s_aggressiveFramePacingSelfDisabled.store(true, std::memory_order_relaxed);
 }
 
 bool ActiveSettings::ExperimentalSkipRedundantResidency()
