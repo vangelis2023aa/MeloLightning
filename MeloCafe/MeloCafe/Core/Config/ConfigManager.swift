@@ -221,6 +221,15 @@ class ConfigManager: ObservableObject {
         }
     }
 
+    var experimentalPersistentTextureCache: Binding<Bool> {
+        Binding {
+            self.config.experimentalPersistentTextureCache
+        } set: {
+            self.config.experimentalPersistentTextureCache = $0
+            self.objectWillChange.send()
+        }
+    }
+
     var experimentalWorkerTextureDecode: Binding<Bool> {
         Binding {
             self.config.experimentalWorkerTextureDecode

@@ -193,6 +193,11 @@ bool ActiveSettings::ExperimentalDecodeCache()
 	return GetConfig().experimental_decode_cache;
 }
 
+bool ActiveSettings::ExperimentalPersistentTextureCache()
+{
+	return GetConfig().experimental_persistent_texture_cache;
+}
+
 bool ActiveSettings::ExperimentalWorkerTextureDecode()
 {
 	return GetConfig().experimental_worker_texture_decode;

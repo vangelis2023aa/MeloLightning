@@ -385,6 +385,13 @@ struct SettingsView: View {
                         }
 
                         VStack(alignment: .leading, spacing: 4) {
+                            Toggle("Save Decoded Textures to Disk", isOn: configManager.experimentalPersistentTextureCache)
+                            Text("Extends the texture cache to disk so unpacked textures survive closing and reopening the app. On this device many textures must be transcoded to a supported format on the CPU every time they load — the biggest CPU cost, and heat source, in texture-heavy scenes. This stores each result in a per-game cache file and, on a later launch, loads the finished bytes back instead of transcoding again, cutting CPU heat and load-time hitching. The stored data is verified before use, so it can never produce a wrong texture; if a cache entry is missing or fails its check the texture is simply decoded normally. Uses disk space (bounded per game); works well together with \"Cache Decoded Textures\".")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        VStack(alignment: .leading, spacing: 4) {
                             Toggle("Decode Textures on Worker Threads", isOn: configManager.experimentalWorkerTextureDecode)
                             Text("Unpacking a texture (untiling and converting it) is CPU work that normally happens entirely on the single graphics thread. When a texture has several faces or layers to unpack — cubemaps, array textures, 3D textures, mip chains — spread that unpacking across a few background threads and wait for it to finish before uploading. This can shorten the pause that texture loads cause on the graphics thread, which helps most when the game is CPU-bound. It briefly uses more CPU cores, so it can raise heat during heavy texture loading; if the device gets hotter without running smoother, turn it off. The image is identical either way.")
                                 .font(.caption)

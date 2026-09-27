@@ -2,6 +2,7 @@
 #include "Cafe/HW/Latte/LatteAddrLib/LatteAddrLib.h"
 #include "config/ActiveSettings.h"
 #include "Cafe/CafeSystem.h"
+#include "Cemu/FileCache/FileCache.h"
 #include "util/helpers/Semaphore.h"
 #include <thread>
 #include <atomic>
@@ -42,21 +43,87 @@ namespace
 		std::unordered_map<uint64, Entry> m_entries; // keyed by primary hash h0; verify(h1)+params guard against collisions
 		uint64 m_useCounter = 0;
 		size_t m_totalBytes = 0;
-		static constexpr size_t kMaxBytes = 64 * 1024 * 1024; // 64 MiB budget
+		static constexpr size_t kMaxBytes = 64 * 1024 * 1024; // 64 MiB in-memory budget (L1)
+
+		// ---- Persistent on-disk backing (experimental_persistent_texture_cache, default OFF) ----
+		// L2 behind the in-memory L1. The CPU decode (untile + format convert; on iOS-without-BC this
+		// includes the BC->ETC2 transcode that dominates texture-heavy CPU heat) is a pure function of
+		// (source bytes, decode params) and its output is title-independent, so a result can be persisted
+		// and reused across app restarts. Backed by the same FileCache the shader cache uses. A hit loads
+		// pre-decoded bytes (pure read + memcpy, no etcpak) instead of transcoding again. Never returns
+		// wrong bytes: an on-disk per-entry header re-verifies magic + size + the full 18-word param block,
+		// exactly as the L1 verify(h1)+params guard does. Writes are offloaded to FileCache's async writer,
+		// so a decode miss pays no extra Latte-thread latency. Bounded by a byte budget: growth is capped
+		// this session and an already-oversized cache is dropped wholesale at open (FileCache has no
+		// per-entry access-time tracking, so true per-entry disk LRU is not available; L1 keeps LRU for the
+		// hot set). Compression is disabled so a hit is pure I/O with no inflate CPU - the point of B1.
+		static constexpr uint32 kDiskMagic = 0x54443031;              // 'TD01' - bump to invalidate on any decode-format change
+		static constexpr uint32 kDiskExtraVersion = 1;                // FileCache extraVersion tag (bump also invalidates)
+		static constexpr uint64 kMaxDiskBytes = 768ull * 1024 * 1024; // 768 MiB per-title disk budget
+		struct DiskEntryHeader
+		{
+			uint32 magic;
+			uint32 size;
+			DecodeCacheParams params;
+		};
+		FileCache* m_disk = nullptr;
+		bool m_diskAttempted = false;
+		uint64 m_diskApproxBytes = 0;
 	public:
-		bool tryGet(uint64 h0, uint64 h1, const DecodeCacheParams& p, uint8* out, uint32 size)
+		// useDisk = the experimental_persistent_texture_cache toggle (L2). L1 always participates.
+		bool tryGet(uint64 h0, uint64 h1, const DecodeCacheParams& p, uint8* out, uint32 size, bool useDisk)
 		{
 			auto it = m_entries.find(h0);
-			if (it == m_entries.end())
-				return false;
-			Entry& e = it->second;
-			if (e.verify != h1 || e.data.size() != size || !(e.params == p))
-				return false; // h0 collision on different content/params -> treat as miss (never returns wrong bytes)
-			memcpy(out, e.data.data(), size);
-			e.lastUse = ++m_useCounter;
-			return true;
+			if (it != m_entries.end())
+			{
+				Entry& e = it->second;
+				if (e.verify == h1 && e.data.size() == size && e.params == p)
+				{
+					memcpy(out, e.data.data(), size);
+					e.lastUse = ++m_useCounter;
+					return true;
+				}
+				// h0 collision on different content/params -> fall through (never returns wrong bytes)
+			}
+			if (useDisk && ensureDisk())
+			{
+				std::vector<uint8> blob;
+				if (m_disk->GetFile({ h0, h1 }, blob) && blob.size() == sizeof(DiskEntryHeader) + (size_t)size)
+				{
+					DiskEntryHeader hdr;
+					memcpy(&hdr, blob.data(), sizeof(hdr));
+					if (hdr.magic == kDiskMagic && hdr.size == size && hdr.params == p)
+					{
+						memcpy(out, blob.data() + sizeof(DiskEntryHeader), size);
+						putMemory(h0, h1, p, out, size); // promote L2 hit into L1
+						return true;
+					}
+				}
+			}
+			return false;
 		}
-		void put(uint64 h0, uint64 h1, const DecodeCacheParams& p, const uint8* data, uint32 size)
+		void put(uint64 h0, uint64 h1, const DecodeCacheParams& p, const uint8* data, uint32 size, bool useDisk)
+		{
+			putMemory(h0, h1, p, data, size);
+			if (useDisk && size > 0 && ensureDisk())
+			{
+				const uint64 blobSize = sizeof(DiskEntryHeader) + (uint64)size;
+				if (m_diskApproxBytes + blobSize <= kMaxDiskBytes) // write-stop budget (no per-entry disk LRU)
+				{
+					std::vector<uint8> blob(sizeof(DiskEntryHeader) + (size_t)size);
+					DiskEntryHeader hdr{};
+					hdr.magic = kDiskMagic;
+					hdr.size = size;
+					hdr.params = p;
+					memcpy(blob.data(), &hdr, sizeof(hdr));
+					memcpy(blob.data() + sizeof(DiskEntryHeader), data, size);
+					m_disk->AddFileAsync({ h0, h1 }, blob.data(), (sint32)blob.size()); // off the Latte thread
+					m_diskApproxBytes += blobSize; // conservative estimate (compression off -> exact)
+				}
+			}
+		}
+	private:
+		void putMemory(uint64 h0, uint64 h1, const DecodeCacheParams& p, const uint8* data, uint32 size)
 		{
 			if (size == 0 || size > kMaxBytes)
 				return;
@@ -72,7 +139,42 @@ namespace
 			while (m_totalBytes > kMaxBytes && m_entries.size() > 1)
 				evictOldest();
 		}
-	private:
+		// Lazily open the per-title on-disk cache. Returns false (without latching) until a title is up,
+		// so a later call can still succeed; a genuine open failure latches to avoid re-hammering the FS.
+		bool ensureDisk()
+		{
+			if (m_disk)
+				return true;
+			if (m_diskAttempted)
+				return false;
+			const uint64 titleId = CafeSystem::GetForegroundTitleId();
+			if (titleId == 0)
+				return false; // no foreground title yet -> retry on a later call (do not latch)
+			m_diskAttempted = true;
+			std::error_code ec;
+			fs::create_directories(ActiveSettings::GetCachePath("textureDecodeCache"), ec);
+			const fs::path path = ActiveSettings::GetCachePath("textureDecodeCache/{:016x}.bin", titleId);
+			// Bounded-growth fail-safe: drop an already-oversized cache wholesale before opening
+			// (FileCache has no per-entry disk LRU to trim with).
+			uint64 existingBytes = 0;
+			if (fs::exists(path, ec))
+			{
+				existingBytes = (uint64)fs::file_size(path, ec);
+				if (ec || existingBytes > kMaxDiskBytes)
+				{
+					fs::remove(path, ec);
+					existingBytes = 0;
+				}
+			}
+			m_disk = FileCache::Open(path, true, kDiskExtraVersion); // extraVersion mismatch -> recreated fresh
+			if (!m_disk)
+				return false;
+			m_disk->UseCompression(false); // a hit must be pure read + memcpy, no inflate CPU
+			// Seed the running budget from the real on-disk size (Open may have recreated the file).
+			const uint64 curBytes = (uint64)fs::file_size(path, ec);
+			m_diskApproxBytes = ec ? existingBytes : curBytes;
+			return true;
+		}
 		void evictOldest()
 		{
 			auto oldest = m_entries.begin();
@@ -938,7 +1040,8 @@ bool LatteTextureLoader_ReloadDataParallel(LatteTexture* tex)
 	// we allocated). Cache probe/store stay single-threaded here — workers never touch M1.
 	const size_t kMaxTransientBytes = 96ull * 1024 * 1024;
 	size_t totalBytes = 0;
-	const bool useDecodeCache = ActiveSettings::ExperimentalDecodeCache();
+	const bool usePersistentCache = ActiveSettings::ExperimentalPersistentTextureCache();
+	const bool useDecodeCache = ActiveSettings::ExperimentalDecodeCache() || usePersistentCache; // B1 also drives the cache path
 	for (SliceDecodeJob& j : jobs)
 	{
 		LatteTextureLoader_begin(&j.ctx, j.sliceIndex, j.mipIndex, tex->physAddress, tex->physMipAddress, format, dim, tex->width, tex->height, tex->depth, tex->mipLevels, tex->pitch, tex->tileMode, tex->swizzle);
@@ -977,7 +1080,7 @@ bool LatteTextureLoader_ReloadDataParallel(LatteTexture* tex)
 			const uint32 srcLen = (uint32)j.ctx.maxOffsetOutdated;
 			DecodeCache_HashSource(j.ctx.inputData, srcLen, j.cacheH0, j.cacheH1);
 			DecodeCache_FoldParams(dcp, j.cacheH0, j.cacheH1);
-			if (g_textureDecodeCache.tryGet(j.cacheH0, j.cacheH1, dcp, j.buffer.data(), (uint32)j.imageSize))
+			if (g_textureDecodeCache.tryGet(j.cacheH0, j.cacheH1, dcp, j.buffer.data(), (uint32)j.imageSize, usePersistentCache))
 				j.skipDecode = true;
 			else
 			{
@@ -995,7 +1098,7 @@ bool LatteTextureLoader_ReloadDataParallel(LatteTexture* tex)
 	for (SliceDecodeJob& j : jobs)
 	{
 		if (j.needCachePut)
-			g_textureDecodeCache.put(j.cacheH0, j.cacheH1, j.cacheParams, j.buffer.data(), (uint32)j.imageSize);
+			g_textureDecodeCache.put(j.cacheH0, j.cacheH1, j.cacheParams, j.buffer.data(), (uint32)j.imageSize, usePersistentCache);
 		if (j.mipIndex == 0 || (tex->texDataPtrLow == 0 && tex->texDataPtrHigh == 0))
 		{
 			tex->texDataPtrLow = tex->physAddress + j.ctx.minOffsetOutdated;
@@ -1065,8 +1168,11 @@ void LatteTextureLoader_UpdateTextureSliceData(LatteTexture* tex, uint32 sliceIn
 		bool decoded = false;
 		// Experimental Decode Cache: reuse a prior decode of identical source bytes + params (default OFF).
 		// Not used while dumping (the dump path re-reads the source separately). Purely additive: on any
-		// miss (or when disabled) the original decode below runs unchanged.
-		if (ActiveSettings::ExperimentalDecodeCache() && !textureLoader.dump && textureLoader.inputData && textureLoader.maxOffsetOutdated > 0)
+		// miss (or when disabled) the original decode below runs unchanged. The persistent (disk) cache (B1)
+		// drives the same path and additionally consults/updates the on-disk L2.
+		const bool serialUsePersistentCache = ActiveSettings::ExperimentalPersistentTextureCache();
+		const bool serialUseDecodeCache = ActiveSettings::ExperimentalDecodeCache() || serialUsePersistentCache;
+		if (serialUseDecodeCache && !textureLoader.dump && textureLoader.inputData && textureLoader.maxOffsetOutdated > 0)
 		{
 			DecodeCacheParams dcp{};
 			dcp.format = (uint32)format;
@@ -1091,14 +1197,14 @@ void LatteTextureLoader_UpdateTextureSliceData(LatteTexture* tex, uint32 sliceIn
 			uint64 h0, h1;
 			DecodeCache_HashSource(textureLoader.inputData, srcLen, h0, h1);
 			DecodeCache_FoldParams(dcp, h0, h1);
-			if (g_textureDecodeCache.tryGet(h0, h1, dcp, pixelData, imageSize))
+			if (g_textureDecodeCache.tryGet(h0, h1, dcp, pixelData, imageSize, serialUsePersistentCache))
 			{
 				decoded = true;
 			}
 			else
 			{
 				texDecoder->decode(&textureLoader, pixelData);
-				g_textureDecodeCache.put(h0, h1, dcp, pixelData, imageSize);
+				g_textureDecodeCache.put(h0, h1, dcp, pixelData, imageSize, serialUsePersistentCache);
 				decoded = true;
 			}
 		}

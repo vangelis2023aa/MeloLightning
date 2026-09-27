@@ -304,6 +304,7 @@ XMLConfigParser CemuConfig::Load(XMLConfigParser& parser)
 	experimental_extended_thread_quantum = experimental.get("ExtendedThreadQuantum", false);
 	experimental_texture_view_fast_path = experimental.get("TextureViewFastPath", false);
 	experimental_decode_cache = experimental.get("DecodeCache", false);
+	experimental_persistent_texture_cache = experimental.get("PersistentTextureCache", false);
 	experimental_worker_texture_decode = experimental.get("WorkerTextureDecode", false);
 	experimental_partial_rendering = experimental.get("PartialRendering", false);
 	experimental_adaptive_render_work = experimental.get("AdaptiveRenderWork", false);
@@ -507,6 +508,7 @@ XMLConfigParser CemuConfig::Save(XMLConfigParser& parser)
 	experimental.set("ExtendedThreadQuantum", experimental_extended_thread_quantum.GetValue());
 	experimental.set("TextureViewFastPath", experimental_texture_view_fast_path.GetValue());
 	experimental.set("DecodeCache", experimental_decode_cache.GetValue());
+	experimental.set("PersistentTextureCache", experimental_persistent_texture_cache.GetValue());
 	experimental.set("WorkerTextureDecode", experimental_worker_texture_decode.GetValue());
 	experimental.set("PartialRendering", experimental_partial_rendering.GetValue());
 	experimental.set("AdaptiveRenderWork", experimental_adaptive_render_work.GetValue());

@@ -143,6 +143,7 @@ public:
 	[[nodiscard]] static bool ExperimentalExtendedThreadQuantum();
 	[[nodiscard]] static bool ExperimentalTextureViewFastPath();
 	[[nodiscard]] static bool ExperimentalDecodeCache();
+	[[nodiscard]] static bool ExperimentalPersistentTextureCache();
 	[[nodiscard]] static bool ExperimentalWorkerTextureDecode();
 	[[nodiscard]] static bool ExperimentalPartialRendering();
 	[[nodiscard]] static bool ExperimentalAdaptiveRenderWork();
