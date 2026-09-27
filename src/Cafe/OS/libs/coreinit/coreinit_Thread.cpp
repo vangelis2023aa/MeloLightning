@@ -8,6 +8,7 @@
 #include "Cafe/HW/Espresso/Debugger/GDBStub.h"
 #include "Cafe/HW/Espresso/Interpreter/PPCInterpreterInternal.h"
 #include "Cafe/HW/Espresso/Recompiler/PPCRecompiler.h"
+#include "Cafe/HW/Latte/Core/Latte.h" // LatteGPUState / gx2GPUSharedArea_t: read (racily) for the Adaptive CPU Quantum flip-pending hint
 
 #include "util/helpers/Semaphore.h"
 #include "util/helpers/ConcurrentQueue.h"
@@ -1184,14 +1185,38 @@ namespace coreinit
 	void __OSThreadStartTimeslice(OSThread_t* thread, PPCInterpreter_t* hCPU)
 	{
 		uint32 coreIndex = PPCInterpreter_getCoreIndex(hCPU);
+		// Adaptive CPU Quantum (experimental_extended_thread_quantum, default OFF). During CPU-bound
+		// compute stretches we run the longer precomputed quantum (ppcThreadQuantumExtended, set at
+		// game-profile load) to amortize the fixed per-reschedule scheduler cost, but fall back to the
+		// base quantum whenever a guest buffer swap is in flight so a just-woken present/frame-submit
+		// thread is never left waiting behind a doubled slice (the starvation that froze the last frame
+		// under the old global-90000 form). The flip-pending probe is two plain loads with no syscall,
+		// so it is cheap enough for this per-timeslice hot path, and it is intentionally racy - a
+		// scheduling hint, never a correctness gate. When the experiment is off ppcThreadQuantumExtended
+		// == ppcThreadQuantum, so both branches choose the same value and behavior is identical to before.
+		uint32 quantum = ppcThreadQuantum;
+		if (ppcThreadQuantumExtended != ppcThreadQuantum)
+		{
+			bool flipPending = false;
+			if (const gx2GPUSharedArea_t* sharedArea = LatteGPUState.sharedArea)
+				flipPending = sharedArea->flipRequestCountBE != sharedArea->flipExecuteCountBE; // equality is byte-swap invariant
+			if (!flipPending)
+				quantum = ppcThreadQuantumExtended;
+		}
 		// run one timeslice
-		hCPU->remainingCycles = ppcThreadQuantum;
+		thread->quantumTicks = quantum; // keep the executed-cycles statistic (quantumTicks - remainingCycles) consistent with the actual budget
+		hCPU->remainingCycles = quantum;
 		hCPU->skippedCycles = 0;
 		// we add a slight randomized variance to the thread quantum to avoid getting stuck in repeated code sequences where one or multiple threads always unload inside a lock
 		// this was seen in Mario Party 10 during early boot where several OSLockMutex operations would align in such a way that one thread would never successfully acquire the lock
+		// The de-alignment must stay PROPORTIONAL to the quantum: a doubled quantum with the same fixed
+		// 0..127 jitter halves the relative variance and lets threads phase-lock again (this is exactly
+		// how the old global-90000 quantum re-opened the livelock). So scale the jitter range with the
+		// chosen quantum - 0..127 at the 45000 base (byte-identical to before), ~0..255 at 90000.
 		if (s_lehmer_lcg[coreIndex] == 0)
 			s_lehmer_lcg[coreIndex] = 12345;
-		hCPU->remainingCycles += (s_lehmer_lcg[coreIndex] & 0x7F);
+		const uint32 jitterMask = (quantum >= ppcThreadQuantum * 2) ? 0xFF : 0x7F;
+		hCPU->remainingCycles += (s_lehmer_lcg[coreIndex] & jitterMask);
 		s_lehmer_lcg[coreIndex] = (uint32)((uint64)s_lehmer_lcg[coreIndex] * 279470273ull % 0xfffffffbull);
 	}
 

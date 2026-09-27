@@ -174,19 +174,28 @@ void gameProfile_load()
 	// apply some settings immediately
 	ppcThreadQuantum = g_current_game_profile->GetThreadQuantum();
 
-	// Experimental: when the game profile has not overridden the quantum, raise the number of PPC
-	// instructions a thread executes before a reschedule. Each reschedule takes the global scheduler
-	// mutex and re-selects a runnable thread; a larger quantum amortizes that fixed overhead over more
-	// work, cutting host CPU spent in the scheduler on a CPU-bound frame. 90000 stays within the range
-	// shipped game profiles already use (20000-100000). Only applied when no per-game profile set a
-	// custom quantum (so profile overrides win), and threads still yield on blocking waits so this does
-	// not spin harder or trade thermals for FPS. Default OFF => unchanged behavior.
+	// Experimental "Adaptive CPU Quantum" (experimental_extended_thread_quantum, default OFF).
+	// Precompute the "long" quantum used during CPU-bound compute stretches. Raising the number of
+	// PPC instructions a thread runs before a reschedule amortizes the fixed per-reschedule scheduler
+	// cost (take the global scheduler mutex + re-select a runnable thread) over more work, cutting
+	// host CPU spent in the scheduler on a CPU-bound frame. Unlike the earlier form, we do NOT raise
+	// the quantum globally: __OSThreadStartTimeslice only uses this extended value while no buffer
+	// swap is in flight and drops back to the base quantum around flips, and it scales its
+	// de-alignment jitter with the chosen quantum. Setting the quantum globally to 90000 re-opened the
+	// quantum-aligned producer/consumer livelock the jitter exists to break (the doubled quantum
+	// halved the relative jitter and let a present/frame-submit thread starve -> last frame stuck).
+	// 90000 stays within the range shipped game profiles already use (20000-100000). Only applied when
+	// no per-game profile set a custom quantum (profile overrides win). When the toggle is off,
+	// ppcThreadQuantumExtended == ppcThreadQuantum so the adaptive path is completely inert.
+	ppcThreadQuantumExtended = ppcThreadQuantum;
 	if (ActiveSettings::ExperimentalExtendedThreadQuantum() &&
 		ppcThreadQuantum == GameProfile::kThreadQuantumDefault)
-		ppcThreadQuantum = 90000;
+		ppcThreadQuantumExtended = ppcThreadQuantum * 2;
 
 	if (ppcThreadQuantum != GameProfile::kThreadQuantumDefault)
 		cemuLog_log(LogType::Force, "Thread quantum set to {}", ppcThreadQuantum);
+	if (ppcThreadQuantumExtended != ppcThreadQuantum)
+		cemuLog_log(LogType::Force, "Adaptive CPU Quantum enabled: extended quantum {} (base {})", ppcThreadQuantumExtended, ppcThreadQuantum);
 }
 
 bool GameProfile::Load(uint64_t title_id)

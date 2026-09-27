@@ -8,6 +8,7 @@
 #include "Cafe/CafeSystem.h"
 
 uint32 ppcThreadQuantum = 45000; // execute 45000 instructions before thread reschedule happens, this value can be overwritten by game profiles
+uint32 ppcThreadQuantumExtended = 45000; // Adaptive CPU Quantum "long" value; == ppcThreadQuantum unless the experiment is enabled (see PPCState.h / gameProfile_load)
 
 void PPCInterpreter_relinquishTimeslice()
 {

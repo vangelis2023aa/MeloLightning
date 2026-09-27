@@ -223,6 +223,11 @@ void PPCTimer_start();
 
 // core info and control
 extern uint32 ppcThreadQuantum;
+// "Long" quantum used by the Adaptive CPU Quantum experiment (experimental_extended_thread_quantum).
+// Precomputed at game-profile load: equals ppcThreadQuantum when the experiment is off, or 2x the
+// base quantum when it is on and no game profile overrode the quantum. __OSThreadStartTimeslice picks
+// between this and ppcThreadQuantum per timeslice depending on whether a buffer swap is in flight.
+extern uint32 ppcThreadQuantumExtended;
 
 uint8* PPCInterpreter_PushAndReturnStackPointer(sint32 offset);
 uint8* PPCInterpreterGetStackPointer();
