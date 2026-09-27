@@ -167,6 +167,15 @@ class ConfigManager: ObservableObject {
         }
     }
 
+    var experimentalSkipRedundantUpload: Binding<Bool> {
+        Binding {
+            self.config.experimentalSkipRedundantUpload
+        } set: {
+            self.config.experimentalSkipRedundantUpload = $0
+            self.objectWillChange.send()
+        }
+    }
+
     var experimentalExtendedCommitThreshold: Binding<Bool> {
         Binding {
             self.config.experimentalExtendedCommitThreshold

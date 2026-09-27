@@ -343,6 +343,13 @@ struct SettingsView: View {
                         }
 
                         VStack(alignment: .leading, spacing: 4) {
+                            Toggle("Skip Redundant Texture Uploads", isOn: configManager.experimentalSkipRedundantUpload)
+                            Text("Metal only. When the game re-uploads a texture slice that already holds the exact same bytes, skip the copy and the GPU transfer entirely. Saves memory bandwidth and CPU copying on texture-heavy scenes. Only applied to textures the GPU has never written, and every upload is content-checked first, so it should never show wrong textures — turn it off if you ever see stale or missing textures.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        VStack(alignment: .leading, spacing: 4) {
                             Toggle("Extended Command Batching", isOn: configManager.experimentalExtendedCommitThreshold)
                             Text("Metal only. Submit larger batches of GPU work per command buffer, reducing how often work is flushed to the GPU. Rendering is unchanged, but larger batches raise GPU latency and memory use, which can shift frame pacing or, in extreme scenes, trigger a GPU timeout.")
                                 .font(.caption)

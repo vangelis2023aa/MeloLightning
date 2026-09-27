@@ -298,6 +298,7 @@ XMLConfigParser CemuConfig::Load(XMLConfigParser& parser)
 	experimental_pipeline_cache_fast_path = experimental.get("PipelineCacheFastPath", false);
 	experimental_sampler_cache_fast_path = experimental.get("SamplerCacheFastPath", false);
 	experimental_pass_texture_fastpath = experimental.get("PassTextureFastPath", false);
+	experimental_skip_redundant_upload = experimental.get("SkipRedundantUpload", false);
 	experimental_extended_commit_threshold = experimental.get("ExtendedCommitThreshold", false);
 	experimental_surfacecopy_dest_dontcare = experimental.get("SurfaceCopyDestDontCare", false);
 	experimental_present_dontcare = experimental.get("PresentDontCare", false);
@@ -503,6 +504,7 @@ XMLConfigParser CemuConfig::Save(XMLConfigParser& parser)
 	experimental.set("PipelineCacheFastPath", experimental_pipeline_cache_fast_path.GetValue());
 	experimental.set("SamplerCacheFastPath", experimental_sampler_cache_fast_path.GetValue());
 	experimental.set("PassTextureFastPath", experimental_pass_texture_fastpath.GetValue());
+	experimental.set("SkipRedundantUpload", experimental_skip_redundant_upload.GetValue());
 	experimental.set("ExtendedCommitThreshold", experimental_extended_commit_threshold.GetValue());
 	experimental.set("SurfaceCopyDestDontCare", experimental_surfacecopy_dest_dontcare.GetValue());
 	experimental.set("PresentDontCare", experimental_present_dontcare.GetValue());

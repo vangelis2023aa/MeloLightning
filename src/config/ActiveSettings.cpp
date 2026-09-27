@@ -163,6 +163,11 @@ bool ActiveSettings::ExperimentalPassTextureFastPath()
 	return GetConfig().experimental_pass_texture_fastpath;
 }
 
+bool ActiveSettings::ExperimentalSkipRedundantUpload()
+{
+	return GetConfig().experimental_skip_redundant_upload;
+}
+
 bool ActiveSettings::ExperimentalExtendedCommitThreshold()
 {
 	return GetConfig().experimental_extended_commit_threshold;

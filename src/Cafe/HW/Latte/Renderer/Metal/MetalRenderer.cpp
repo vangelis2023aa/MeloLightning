@@ -1076,10 +1076,60 @@ static DepthStencilUploadLayout GetDepthStencilUploadLayout(Latte::E_GX2SURFFMT 
     }
 }
 
+// Experimental (experimental_skip_redundant_upload, B3): 128-bit content fingerprint of an upload's raw
+// bytes. Independent of the decode-cache hash (which is file-local to LatteTextureLoader and not exported);
+// used only to decide whether the identical slice is already resident so the staging-copy + blit can be
+// skipped. Reads every byte, folds the length into the seed, and avalanches at the end so a false match is
+// not realistically reachable. Purely a decision input — never alters the bytes that get uploaded.
+static inline void MtlHashUploadBytes(const void* data, uint32 size, uint64& outH0, uint64& outH1)
+{
+    const uint8* p = static_cast<const uint8*>(data);
+    uint64 h0 = 1469598103934665603ull;                              // FNV-1a offset basis
+    uint64 h1 = 0x9E3779B97F4A7C15ull ^ ((uint64)size * 0xFF51AFD7ED558CCDull);
+    uint32 i = 0;
+    for (; i + 8 <= size; i += 8)
+    {
+        uint64 block;
+        memcpy(&block, p + i, sizeof(block));
+        h0 = (h0 ^ block) * 1099511628211ull;                        // FNV-1a over 8-byte chunks
+        uint64 k = block * 0xFF51AFD7ED558CCDull;
+        k = (k << 31) | (k >> 33);                                   // rotl31
+        h1 = (h1 ^ k) * 0x100000001B3ull + 0x9E3779B97F4A7C15ull;
+    }
+    if (i < size)
+    {
+        uint64 tail = 0;
+        for (uint32 b = 0; i + b < size; ++b)
+            tail |= (uint64)p[i + b] << (b * 8);
+        h0 = (h0 ^ tail) * 1099511628211ull;
+        h1 = (h1 ^ tail) * 0x100000001B3ull;
+    }
+    h0 ^= h0 >> 33; h0 *= 0xFF51AFD7ED558CCDull; h0 ^= h0 >> 29;     // final avalanche
+    h1 ^= h1 >> 33; h1 *= 0xC4CEB9FE1A85EC53ull; h1 ^= h1 >> 32;
+    outH0 = h0;
+    outH1 = h1;
+}
+
 // TODO: do a cpu copy on Apple Silicon?
 void MetalRenderer::texture_loadSlice(LatteTexture* hostTexture, sint32 width, sint32 height, sint32 depth, void* pixelData, sint32 sliceIndex, sint32 mipIndex, uint32 compressedImageSize)
 {
     auto textureMtl = (LatteTextureMtl*)hostTexture;
+
+    // Experimental "skip redundant texture upload" (B3): if this exact subresource already holds these
+    // identical bytes, the staging-copy + GPU blit are pure waste. Only safe while the texture has never
+    // been GPU-written (isUpdatedOnGPU is monotonic false->true): then the resident content came solely
+    // from earlier texture_loadSlice calls, so a fingerprint match => the same bytes are already resident.
+    // Depth is excluded (also covers the packed depth/stencil branch below). Key uses the ORIGINAL slice
+    // index, captured here before the 3D fold rewrites it. OFF or any miss/uncertainty => normal upload.
+    const uint64 reuseKey = ((uint64)(uint32)mipIndex << 32) | (uint32)sliceIndex;
+    const bool reuseEligible = ActiveSettings::ExperimentalSkipRedundantUpload() && !textureMtl->isUpdatedOnGPU && !textureMtl->isDepth;
+    uint64 reuseH0 = 0, reuseH1 = 0;
+    if (reuseEligible)
+    {
+        MtlHashUploadBytes(pixelData, compressedImageSize, reuseH0, reuseH1);
+        if (textureMtl->TryReuseUpload(reuseKey, reuseH0, reuseH1, compressedImageSize))
+            return; // identical bytes already resident — skip staging copy + blit entirely
+    }
 
     uint32 offsetZ = 0;
     if (textureMtl->Is3DTexture())
@@ -1156,6 +1206,10 @@ void MetalRenderer::texture_loadSlice(LatteTexture* hostTexture, sint32 width, s
     // Copy the data from the temporary buffer to the texture
     blitCommandEncoder->copyFromBuffer(allocation.mtlBuffer, allocation.bufferOffset, bytesPerRow, 0, MTL::Size(width, height, 1), textureMtl->GetTexture(), sliceIndex, mipIndex, MTL::Origin(0, 0, offsetZ), GetTextureUploadBlitOption(formatInfo.pixelFormat));
     //}
+
+    // B3: record what now resides in this subresource so an identical future upload can be skipped.
+    if (reuseEligible)
+        textureMtl->RecordUpload(reuseKey, reuseH0, reuseH1, compressedImageSize);
 }
 
 void MetalRenderer::texture_clearColorSlice(LatteTexture* hostTexture, sint32 sliceIndex, sint32 mipIndex, float r, float g, float b, float a)

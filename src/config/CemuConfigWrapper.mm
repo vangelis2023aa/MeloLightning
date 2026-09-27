@@ -169,6 +169,8 @@ static CPUMode toCPUMode(ObjCCPUMode mode) {
 - (void)setExperimentalSamplerCacheFastPath:(BOOL)v { GetConfig().experimental_sampler_cache_fast_path = v; autoSave(); }
 - (BOOL)experimentalPassTextureFastPath    { return GetConfig().experimental_pass_texture_fastpath.GetValue(); }
 - (void)setExperimentalPassTextureFastPath:(BOOL)v { GetConfig().experimental_pass_texture_fastpath = v; autoSave(); }
+- (BOOL)experimentalSkipRedundantUpload    { return GetConfig().experimental_skip_redundant_upload.GetValue(); }
+- (void)setExperimentalSkipRedundantUpload:(BOOL)v { GetConfig().experimental_skip_redundant_upload = v; autoSave(); }
 
 - (BOOL)experimentalExtendedCommitThreshold { return GetConfig().experimental_extended_commit_threshold.GetValue(); }
 - (void)setExperimentalExtendedCommitThreshold:(BOOL)v { GetConfig().experimental_extended_commit_threshold = v; autoSave(); }
