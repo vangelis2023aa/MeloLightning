@@ -155,6 +155,13 @@ public:
 // 1 = soft-knee limiter, 2 = -3 dB headroom, 3 = -6 dB headroom. See CemuConfig experimental_audio_anti_clip.
 [[nodiscard]] static sint32 ExperimentalAudioAntiClip();
 
+// Experimental emulated-toy-portal save-throttle intervals in milliseconds (per portal type).
+// 0 = "Every Time" = immediate save on every change (default). >0 rate-limits disk writes to at
+// most once per interval per figure. See CemuConfig experimental_*_save_interval_ms.
+[[nodiscard]] static sint32 ExperimentalSkylanderSaveIntervalMs();
+[[nodiscard]] static sint32 ExperimentalInfinitySaveIntervalMs();
+[[nodiscard]] static sint32 ExperimentalDimensionsSaveIntervalMs();
+
 private:
 	inline static bool s_setPathsCalled = false;
 	// dump options

@@ -6,6 +6,7 @@
 #include "Backend.h"
 
 #include "util/crypto/aes128.h"
+#include "config/ActiveSettings.h"
 
 #include <openssl/crypto.h>
 #include "openssl/sha.h"
@@ -774,8 +775,15 @@ namespace nsyshid
 		const uint8 file_block = (block == 0) ? 1 : (block * 4);
 		if (figure.present && file_block < 20)
 		{
-			memcpy(figure.data.data() + (file_block * 16), to_write_buf, 16);
-			figure.Save();
+			uint8* dst = figure.data.data() + (file_block * 16);
+			// Only a real change (block actually differs) marks the figure dirty.
+			const bool changed = memcmp(dst, to_write_buf, 16) != 0;
+			if (changed)
+				memcpy(dst, to_write_buf, 16);
+			// Buffer is always current; disk write is throttle-gated.
+			// intervalMs 0 = "Every Time" = original per-write flush.
+			if (figure.saveThrottle.ShouldSaveOnChange(changed, ActiveSettings::ExperimentalInfinitySaveIntervalMs()))
+				figure.Save();
 		}
 		replyBuf[4] = GenerateChecksum(replyBuf, 4);
 	}
@@ -823,6 +831,23 @@ namespace nsyshid
 
 		infFile->SetPosition(0);
 		infFile->writeData(data.data(), data.size());
+		// Flush the buffered write to the OS immediately. FileStream only flushes
+		// on close, which iOS bypasses when it terminates the app, so an unflushed
+		// change would be lost on exit (matches the Skylander persistence fix).
+		infFile->Flush();
+	}
+
+	void InfinityUSB::InfinityFigure::FlushPendingSave()
+	{
+		if (saveThrottle.FlushPending())
+			Save();
+	}
+
+	void InfinityUSB::FlushPendingSaves()
+	{
+		std::lock_guard lock(m_infinityMutex);
+		for (auto& figure : m_figures)
+			figure.FlushPendingSave();
 	}
 
 	bool InfinityUSB::RemoveFigure(uint8 position)
@@ -830,7 +855,8 @@ namespace nsyshid
 		std::lock_guard lock(m_infinityMutex);
 		InfinityFigure& figure = m_figures[position];
 
-		figure.Save();
+		// Removal is a lifecycle boundary: force any pending throttled change out.
+		figure.FlushPendingSave();
 		figure.infFile.reset();
 
 		if (figure.present)
@@ -882,6 +908,7 @@ namespace nsyshid
 		figure.infFile = std::move(inFile);
 		memcpy(figure.data.data(), buf.data(), figure.data.size());
 		figure.present = true;
+		figure.saveThrottle.Reset();
 		if (figure.orderAdded == 255)
 		{
 			figure.orderAdded = m_figureOrder;

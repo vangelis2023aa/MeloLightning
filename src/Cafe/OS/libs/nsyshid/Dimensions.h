@@ -2,6 +2,7 @@
 
 #include "nsyshid.h"
 #include "Backend.h"
+#include "PortalSaveThrottle.h"
 
 #include "Common/FileStream.h"
 
@@ -51,7 +52,10 @@ namespace nsyshid
 			uint8 index = 255;
 			uint8 pad = 255;
 			uint32 id = 0;
+			PortalSaveThrottle saveThrottle;
 			void Save();
+			// Force any pending throttled change to disk (lifecycle / teardown).
+			void FlushPendingSave();
 		};
 
 		void SendCommand(std::span<const uint8, 32> buf);
@@ -75,6 +79,8 @@ namespace nsyshid
 		uint32 LoadFigure(const std::array<uint8, 0x2D * 0x04>& buf, std::unique_ptr<FileStream> file, uint8 pad, uint8 index);
 		bool CreateFigure(fs::path pathName, uint32 id);
 		bool MoveFigure(uint8 pad, uint8 index, uint8 oldPad, uint8 oldIndex);
+		// Force-flush every figure's pending throttled save (app teardown).
+		void FlushPendingSaves();
 		static std::map<const uint32, const char*> GetListMinifigs();
 		static std::map<const uint32, const char*> GetListTokens();
 		std::string FindFigure(uint32 figNum);

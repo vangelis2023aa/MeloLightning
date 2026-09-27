@@ -194,4 +194,14 @@ bool infinityFigureFits(uint32 figure, NSInteger slot)
     dimensionsSlots[source] = {};
     return nil;
 }
+
++ (void)flushPendingFigureSaves
+{
+    // Force each portal's per-figure throttle to write any pending change now.
+    // No-op for figures with nothing pending (e.g. "Every Time" mode already
+    // saved on write). Safe to call regardless of which devices are emulated.
+    nsyshid::g_skyportal.FlushPendingSaves();
+    nsyshid::g_infinitybase.FlushPendingSaves();
+    nsyshid::g_dimensionstoypad.FlushPendingSaves();
+}
 @end

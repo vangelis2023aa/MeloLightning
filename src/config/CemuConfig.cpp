@@ -309,6 +309,9 @@ XMLConfigParser CemuConfig::Load(XMLConfigParser& parser)
 	experimental_adaptive_render_work = experimental.get("AdaptiveRenderWork", false);
 	experimental_audio_buffer_blocks = experimental.get("AudioBufferBlocks", 0);
 	experimental_audio_anti_clip = experimental.get("AudioAntiClip", 0);
+	experimental_skylander_save_interval_ms = experimental.get("SkylanderSaveIntervalMs", 0);
+	experimental_infinity_save_interval_ms = experimental.get("InfinitySaveIntervalMs", 0);
+	experimental_dimensions_save_interval_ms = experimental.get("DimensionsSaveIntervalMs", 0);
 	experimental_metalfx_enable = experimental.get("MetalFXEnable", false);
 	experimental_metalfx_render_scale = experimental.get("MetalFXRenderScale", 67);
 	experimental_metalfx_mode = experimental.get("MetalFXMode", 0);
@@ -509,6 +512,9 @@ XMLConfigParser CemuConfig::Save(XMLConfigParser& parser)
 	experimental.set("AdaptiveRenderWork", experimental_adaptive_render_work.GetValue());
 	experimental.set("AudioBufferBlocks", experimental_audio_buffer_blocks.GetValue());
 	experimental.set("AudioAntiClip", experimental_audio_anti_clip.GetValue());
+	experimental.set("SkylanderSaveIntervalMs", experimental_skylander_save_interval_ms.GetValue());
+	experimental.set("InfinitySaveIntervalMs", experimental_infinity_save_interval_ms.GetValue());
+	experimental.set("DimensionsSaveIntervalMs", experimental_dimensions_save_interval_ms.GetValue());
 	experimental.set("MetalFXEnable", experimental_metalfx_enable.GetValue());
 	experimental.set("MetalFXRenderScale", experimental_metalfx_render_scale.GetValue());
 	experimental.set("MetalFXMode", experimental_metalfx_mode.GetValue());

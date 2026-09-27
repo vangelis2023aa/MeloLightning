@@ -46,6 +46,40 @@ enum EmulatedDevice: Int, CaseIterable, Identifiable {
         case .dimensions: return ConfigManager.shared.emulateDimensionsToypad
         }
     }
+
+    // Per-device save-throttle interval in milliseconds (0 = Every Time = immediate save).
+    var saveIntervalBinding: Binding<Int> {
+        switch self {
+        case .skylanders: return ConfigManager.shared.experimentalSkylanderSaveIntervalMs
+        case .infinity: return ConfigManager.shared.experimentalInfinitySaveIntervalMs
+        case .dimensions: return ConfigManager.shared.experimentalDimensionsSaveIntervalMs
+        }
+    }
+
+    // Short device name used in the "Save … Changes" setting label.
+    var saveLabelName: String {
+        switch self {
+        case .skylanders: return "Skylanders"
+        case .infinity: return "Disney Infinity"
+        case .dimensions: return "LEGO Dimensions"
+        }
+    }
+}
+
+// Discrete save-throttle steps shared by all three portals: "Every Time" (0 ms, immediate save)
+// through "Every 20 Seconds". Value is the interval in milliseconds stored in the config.
+struct PortalSaveInterval: Identifiable {
+    let milliseconds: Int
+    let label: String
+    var id: Int { milliseconds }
+
+    static let all: [PortalSaveInterval] = [
+        .init(milliseconds: 0,     label: "Every Time"),
+        .init(milliseconds: 2000,  label: "Every 2 Seconds"),
+        .init(milliseconds: 5000,  label: "Every 5 Seconds"),
+        .init(milliseconds: 10000, label: "Every 10 Seconds"),
+        .init(milliseconds: 20000, label: "Every 20 Seconds"),
+    ]
 }
 
 struct EmulatedDevicesView: View {
@@ -64,7 +98,17 @@ struct EmulatedDevicesView: View {
                     }
                     Toggle("Emulate Device", isOn: device.enabled)
                 }
-                
+
+                Section {
+                    Picker("Save \(device.saveLabelName) Changes", selection: device.saveIntervalBinding) {
+                        ForEach(PortalSaveInterval.all) { interval in
+                            Text(interval.label).tag(interval.milliseconds)
+                        }
+                    }
+                } footer: {
+                    Text("How often in-game progress is written back to the figure file. \"Every Time\" saves immediately on every change (safest). Longer intervals reduce disk writes; a pending change is still saved when the figure is removed or moved and when the app is backgrounded, so progress is not lost. Each device is configured independently.")
+                }
+
                 EmulatedDeviceSlotsView(device: device)
                     .id(device)
             }

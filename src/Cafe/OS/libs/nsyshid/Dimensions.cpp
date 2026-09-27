@@ -4,6 +4,7 @@
 #include "Backend.h"
 
 #include "Common/FileStream.h"
+#include "config/ActiveSettings.h"
 
 #include <array>
 #include <random>
@@ -629,6 +630,7 @@ namespace nsyshid
 		figure.pad = pad;
 		figure.index = index + 1;
 		figure.data = buf;
+		figure.saveThrottle.Reset();
 		// When a figure is added to the toypad, respond to the game with the pad they were added to, their index,
 		// the direction (0x00 in byte 6 for added) and their UID
 		std::array<uint8, 32> figureChangeResponse = {0x56, 0x0b, figure.pad, 0x00, figure.index, 0x00, buf[0], buf[1], buf[2], buf[4], buf[5], buf[6], buf[7]};
@@ -655,7 +657,8 @@ namespace nsyshid
 														  figure.data[4], figure.data[5], figure.data[6], figure.data[7]};
 			figureChangeResponse[13] = GenerateChecksum(figureChangeResponse, 13);
 			m_figureAddedRemovedResponses.push(figureChangeResponse);
-			figure.Save();
+			// Removal is a lifecycle boundary: force any pending change to disk.
+			figure.FlushPendingSave();
 			figure.dimFile.reset();
 		}
 
@@ -762,6 +765,10 @@ namespace nsyshid
 		RemoveFigure(pad, index, true);
 
 		DimensionsMini& figure = GetFigureByIndex(oldIndex);
+		// Flush any pending throttled change on the old slot BEFORE we move its
+		// file handle away. The new slot's throttle is Reset() in LoadFigure, so a
+		// change left pending here would otherwise never be flagged for save again.
+		figure.FlushPendingSave();
 		const std::array<uint8, 0x2D * 0x04> data = figure.data;
 		std::unique_ptr<FileStream> inFile = std::move(figure.dimFile);
 
@@ -1065,13 +1072,20 @@ namespace nsyshid
 			// Copy 4 bytes to the page on the figure requested by the game
 			if (figure.index != 255 && page < 0x2D)
 			{
+				uint8* dst = figure.data.data() + (page * 4);
+				// Only a real change (page bytes actually differ) marks it dirty.
+				const bool changed = std::memcmp(dst, toWriteBuf.data(), 4) != 0;
 				// Id is written to page 36
 				if (page == 36)
 				{
 					figure.id = (uint32&)toWriteBuf[0];
 				}
-				std::memcpy(figure.data.data() + (page * 4), toWriteBuf.data(), 4);
-				figure.Save();
+				if (changed)
+					std::memcpy(dst, toWriteBuf.data(), 4);
+				// Buffer is always current; disk write is throttle-gated.
+				// intervalMs 0 = "Every Time" = original per-write flush.
+				if (figure.saveThrottle.ShouldSaveOnChange(changed, ActiveSettings::ExperimentalDimensionsSaveIntervalMs()))
+					figure.Save();
 			}
 		}
 		replyBuf[4] = GenerateChecksum(replyBuf, 4);
@@ -1137,6 +1151,23 @@ namespace nsyshid
 
 		dimFile->SetPosition(0);
 		dimFile->writeData(data.data(), data.size());
+		// Flush the buffered write to the OS immediately. FileStream only flushes
+		// on close, which iOS bypasses when it terminates the app, so an unflushed
+		// change would be lost on exit (matches the Skylander persistence fix).
+		dimFile->Flush();
+	}
+
+	void DimensionsUSB::DimensionsMini::FlushPendingSave()
+	{
+		if (saveThrottle.FlushPending())
+			Save();
+	}
+
+	void DimensionsUSB::FlushPendingSaves()
+	{
+		std::lock_guard lock(m_dimensionsMutex);
+		for (auto& figure : m_figures)
+			figure.FlushPendingSave();
 	}
 
 	std::map<const uint32, const char*> DimensionsUSB::GetListMinifigs()

@@ -197,6 +197,15 @@ static CPUMode toCPUMode(ObjCCPUMode mode) {
 - (int)experimentalAudioAntiClip           { return GetConfig().experimental_audio_anti_clip.GetValue(); }
 - (void)setExperimentalAudioAntiClip:(int)v { GetConfig().experimental_audio_anti_clip = v; autoSave(); }
 
+- (int)experimentalSkylanderSaveIntervalMs { return GetConfig().experimental_skylander_save_interval_ms.GetValue(); }
+- (void)setExperimentalSkylanderSaveIntervalMs:(int)v { GetConfig().experimental_skylander_save_interval_ms = v; autoSave(); }
+
+- (int)experimentalInfinitySaveIntervalMs  { return GetConfig().experimental_infinity_save_interval_ms.GetValue(); }
+- (void)setExperimentalInfinitySaveIntervalMs:(int)v { GetConfig().experimental_infinity_save_interval_ms = v; autoSave(); }
+
+- (int)experimentalDimensionsSaveIntervalMs { return GetConfig().experimental_dimensions_save_interval_ms.GetValue(); }
+- (void)setExperimentalDimensionsSaveIntervalMs:(int)v { GetConfig().experimental_dimensions_save_interval_ms = v; autoSave(); }
+
 - (BOOL)experimentalMetalFXEnable          { return GetConfig().experimental_metalfx_enable.GetValue(); }
 - (void)setExperimentalMetalFXEnable:(BOOL)v { GetConfig().experimental_metalfx_enable = v; autoSave(); }
 

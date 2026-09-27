@@ -266,6 +266,33 @@ class ConfigManager: ObservableObject {
         }
     }
 
+    var experimentalSkylanderSaveIntervalMs: Binding<Int> {
+        Binding {
+            Int(self.config.experimentalSkylanderSaveIntervalMs)
+        } set: {
+            self.config.experimentalSkylanderSaveIntervalMs = Int32($0)
+            self.objectWillChange.send()
+        }
+    }
+
+    var experimentalInfinitySaveIntervalMs: Binding<Int> {
+        Binding {
+            Int(self.config.experimentalInfinitySaveIntervalMs)
+        } set: {
+            self.config.experimentalInfinitySaveIntervalMs = Int32($0)
+            self.objectWillChange.send()
+        }
+    }
+
+    var experimentalDimensionsSaveIntervalMs: Binding<Int> {
+        Binding {
+            Int(self.config.experimentalDimensionsSaveIntervalMs)
+        } set: {
+            self.config.experimentalDimensionsSaveIntervalMs = Int32($0)
+            self.objectWillChange.send()
+        }
+    }
+
     var experimentalMetalFXEnable: Binding<Bool> {
         Binding {
             self.config.experimentalMetalFXEnable

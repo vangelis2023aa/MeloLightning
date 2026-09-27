@@ -8,6 +8,7 @@
 #include "Common/FileStream.h"
 #include "audio/IAudioAPI.h"
 #include "config/CemuConfig.h"
+#include "config/ActiveSettings.h"
 
 namespace nsyshid
 {
@@ -854,6 +855,7 @@ namespace nsyshid
 			skylander.queuedStatus.push(Skylander::ADDED);
 			skylander.queuedStatus.push(Skylander::READY);
 			skylander.lastId = skySerial;
+			skylander.saveThrottle.Reset();
 		}
 		return foundSlot;
 	}
@@ -868,7 +870,9 @@ namespace nsyshid
 			thesky.status = 2;
 			thesky.queuedStatus.push(2);
 			thesky.queuedStatus.push(0);
-			thesky.Save();
+			// Removal is a lifecycle boundary: force any pending throttled change
+			// to disk now so taking the figure off the portal never loses progress.
+			thesky.FlushPendingSave();
 			thesky.skyFile.reset();
 			return true;
 		}
@@ -951,8 +955,16 @@ namespace nsyshid
 		if (skylander.status & 1)
 		{
 			replyBuf[1] = (0x10 | skyNum);
-			memcpy(skylander.data.data() + (block * 16), toWriteBuf, 16);
-			skylander.Save();
+			uint8* dst = skylander.data.data() + (block * 16);
+			// Only treat this as a real change if the 16-byte block actually
+			// differs; unchanged (no-op) writes never mark the figure dirty.
+			const bool changed = memcmp(dst, toWriteBuf, 16) != 0;
+			if (changed)
+				memcpy(dst, toWriteBuf, 16);
+			// In-memory buffer is always current (above); the disk write is rate
+			// limited. intervalMs 0 = "Every Time" = original per-write flush.
+			if (skylander.saveThrottle.ShouldSaveOnChange(changed, ActiveSettings::ExperimentalSkylanderSaveIntervalMs()))
+				skylander.Save();
 		}
 		else
 		{
@@ -1033,5 +1045,19 @@ namespace nsyshid
 		// terminated by the OS without running those destructors, so without this
 		// flush in-game progress would sit in the buffer and be lost on exit.
 		skyFile->Flush();
+	}
+
+	void SkylanderUSB::Skylander::FlushPendingSave()
+	{
+		// Write only if the throttle is holding a real, not-yet-persisted change.
+		if (saveThrottle.FlushPending())
+			Save();
+	}
+
+	void SkylanderUSB::FlushPendingSaves()
+	{
+		std::lock_guard lock(m_skyMutex);
+		for (auto& skylander : m_skylanders)
+			skylander.FlushPendingSave();
 	}
 } // namespace nsyshid

@@ -227,6 +227,21 @@ sint32 ActiveSettings::ExperimentalAudioAntiClip()
 	return GetConfig().experimental_audio_anti_clip.GetValue();
 }
 
+sint32 ActiveSettings::ExperimentalSkylanderSaveIntervalMs()
+{
+	return GetConfig().experimental_skylander_save_interval_ms.GetValue();
+}
+
+sint32 ActiveSettings::ExperimentalInfinitySaveIntervalMs()
+{
+	return GetConfig().experimental_infinity_save_interval_ms.GetValue();
+}
+
+sint32 ActiveSettings::ExperimentalDimensionsSaveIntervalMs()
+{
+	return GetConfig().experimental_dimensions_save_interval_ms.GetValue();
+}
+
 GraphicAPI ActiveSettings::GetGraphicsAPI()
 {
 	const GraphicAPI api = g_current_game_profile->GetGraphicsAPI().value_or(GetConfig().graphic_api);

@@ -23,6 +23,10 @@ typedef NS_ENUM(NSInteger, CemuUSBDevice) {
 + (nullable NSString *)clearDevice:(CemuUSBDevice)device slot:(NSInteger)slot NS_SWIFT_NAME(clear(_:slot:));
 + (nullable NSString *)createDevice:(CemuUSBDevice)device figureID:(uint32_t)figureID variant:(uint16_t)variant path:(NSString *)path NS_SWIFT_NAME(create(_:figureID:variant:path:));
 + (nullable NSString *)moveDimensionsSlot:(NSInteger)source toSlot:(NSInteger)destination NS_SWIFT_NAME(moveDimensions(from:to:));
+// Force any throttled, not-yet-persisted figure changes across all portals to disk. Call on app
+// teardown boundaries (e.g. entering background) so pending progress is never stranded in memory
+// on iOS, where the emulator's C++ destructors are not reliably run before the app is killed.
++ (void)flushPendingFigureSaves NS_SWIFT_NAME(flushPendingFigureSaves());
 @end
 
 NS_ASSUME_NONNULL_END

@@ -4,6 +4,7 @@
 
 #include "nsyshid.h"
 #include "Backend.h"
+#include "PortalSaveThrottle.h"
 
 #include "Common/FileStream.h"
 
@@ -56,7 +57,10 @@ namespace nsyshid
 			std::queue<uint8> queuedStatus;
 			std::array<uint8, SKY_FIGURE_SIZE> data{};
 			uint32 lastId = 0;
+			PortalSaveThrottle saveThrottle;
 			void Save();
+			// Force any pending throttled change to disk (lifecycle / teardown).
+			void FlushPendingSave();
 
 			enum : uint8
 			{
@@ -87,6 +91,8 @@ namespace nsyshid
 
 		uint8 LoadSkylander(uint8* buf, std::unique_ptr<FileStream> file);
 		bool RemoveSkylander(uint8 skyNum);
+		// Force-flush every figure's pending throttled save (app teardown).
+		void FlushPendingSaves();
 		bool CreateSkylander(fs::path pathName, uint16 skyId, uint16 skyVar);
 		uint16 SkylanderCRC16(uint16 initValue, const uint8* buffer, uint32 size);
 		static std::map<const std::pair<const uint16, const uint16>, const char*> GetListSkylanders();

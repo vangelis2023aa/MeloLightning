@@ -566,6 +566,19 @@ struct CemuConfig
 	// 3 = -6 dB headroom. Read once per audio frame; does not touch decode/resample/RT callback.
 	ConfigValue<sint32> experimental_audio_anti_clip{ 0 };
 
+	// Experimental emulated-toy-portal save throttling (Skylanders / Disney Infinity / LEGO
+	// Dimensions). The portals persist figure NFC data back to the original .sky/.bin file. By
+	// default the game's every-block write triggers an immediate whole-figure flush to disk. These
+	// values rate-limit that disk I/O per figure: the in-memory figure buffer is still updated on
+	// every write (emulation is unaffected), but the actual file write happens at most once per
+	// interval, and only when a real change is pending. A pending change is always force-flushed
+	// when the figure is removed/moved and when the app is backgrounded, so progress is never lost.
+	// Units are milliseconds. 0 = "Every Time" = immediate save on every change (default, identical
+	// to the original behavior). Each portal is configured independently; there is no shared timer.
+	ConfigValue<sint32> experimental_skylander_save_interval_ms{ 0 };
+	ConfigValue<sint32> experimental_infinity_save_interval_ms{ 0 };
+	ConfigValue<sint32> experimental_dimensions_save_interval_ms{ 0 };
+
 	// Experimental MetalFX spatial upscaling (iOS, Metal only, requires iOS 16+ and a supported
 	// device). All default so the renderer behaves EXACTLY as without these options:
 	//  - enable == false      => present path unchanged, no MetalFX resources allocated.

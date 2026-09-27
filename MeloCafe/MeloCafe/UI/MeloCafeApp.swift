@@ -39,6 +39,14 @@ final class MainSceneDelegate: UIResponder, UIWindowSceneDelegate {
     func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {
         (window?.rootViewController as? ContentHostingController)?.open(URLContexts.map(\.url))
     }
+
+    func sceneDidEnterBackground(_ scene: UIScene) {
+        // iOS may terminate the app while it is suspended without running the
+        // emulator's C++ destructors, so force any throttled emulated-portal
+        // figure saves (Skylanders / Disney Infinity / LEGO Dimensions) to disk
+        // now. No-op when nothing is pending (e.g. "Every Time" save mode).
+        CemuEmulatedUSBDevices.flushPendingFigureSaves()
+    }
 }
 
 class ContentHostingController: UIHostingController<AnyView> {

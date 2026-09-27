@@ -141,6 +141,11 @@ typedef NS_ENUM(NSInteger, ObjCPrecompiledShaderOption) {
 @property (nonatomic) int experimentalAudioBufferBlocks;
 @property (nonatomic) int experimentalAudioAntiClip;
 
+// Experimental emulated-toy-portal save-throttle intervals (milliseconds; 0 = Every Time)
+@property (nonatomic) int experimentalSkylanderSaveIntervalMs;
+@property (nonatomic) int experimentalInfinitySaveIntervalMs;
+@property (nonatomic) int experimentalDimensionsSaveIntervalMs;
+
 // Experimental MetalFX spatial upscaling (Metal only; see "Experimental Graphics" settings section)
 @property (nonatomic) BOOL experimentalMetalFXEnable;
 @property (nonatomic) int experimentalMetalFXRenderScale;
