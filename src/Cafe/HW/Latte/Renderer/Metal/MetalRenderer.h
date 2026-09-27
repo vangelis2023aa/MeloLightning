@@ -385,6 +385,7 @@ public:
     void EndEncoding();
     void CommitCommandBuffer();
     void ProcessFinishedCommandBuffers();
+    void UpdateAdaptiveCommitThreshold(); // Adaptive Commit Cadence (experimental_extended_commit_threshold)
 
     bool AcquireDrawable(bool mainWindow);
 
@@ -635,6 +636,11 @@ private:
     uint32 m_recordedDrawcalls;
     uint32 m_defaultCommitTreshlod;
     uint32 m_commitTreshold;
+    // Adaptive Commit Cadence (experimental_extended_commit_threshold). Target opportunistic-commit
+    // threshold maintained by UpdateAdaptiveCommitThreshold() from command-buffer queue-depth AIMD,
+    // clamped to [m_defaultCommitTreshlod, 2*m_defaultCommitTreshlod]. Render-thread only (no atomics).
+    // Inert when the toggle is OFF; GetCommandBuffer then uses the static m_defaultCommitTreshlod.
+    uint32 m_adaptiveCommitThreshold = 0;
 
 	// Bumped at the start of every draw sequence; see GetDrawPassGeneration(). GPU-thread only.
 	uint32 m_drawPassGeneration = 1;

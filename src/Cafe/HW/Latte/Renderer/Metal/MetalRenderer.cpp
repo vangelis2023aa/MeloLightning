@@ -240,6 +240,10 @@ MetalRenderer::MetalRenderer()
     else
         m_defaultCommitTreshlod = 196;
 
+    // Adaptive Commit Cadence (experimental_extended_commit_threshold) starts at the static baseline;
+    // UpdateAdaptiveCommitThreshold() moves it within [baseline, 2x baseline] once the toggle is on.
+    m_adaptiveCommitThreshold = m_defaultCommitTreshlod;
+
     // Occlusion queries
     m_occlusionQuery.m_resultBuffer = m_device->newBuffer(OCCLUSION_QUERY_BUFFER_COUNT * OCCLUSION_QUERY_POOL_SIZE * sizeof(uint64), MTL::ResourceStorageModeShared);
 #ifdef CEMU_DEBUG_ASSERT
@@ -2469,15 +2473,21 @@ MTL::CommandBuffer* MetalRenderer::GetCommandBuffer()
 
         m_recordedDrawcalls = 0;
         m_commitTreshold = m_defaultCommitTreshlod;
-        // Experimental extended command-buffer batching (experimental_extended_commit_threshold): when
-        // ON, raise the opportunistic commit cadence (2x) so more draws batch into one command buffer
-        // before an opportunistic commit. Only the default cadence is scaled — RequestSoonCommit()
-        // still forces a prompt commit for readback / occlusion-query ordering (it overrides
-        // m_commitTreshold directly to m_recordedDrawcalls+8), and explicit commits (present/flush)
-        // call CommitCommandBuffer() unconditionally. Output is byte-identical; only submission cadence
-        // changes. When OFF this is one atomic bool read per command-buffer creation.
+        // Experimental Adaptive Commit Cadence (experimental_extended_commit_threshold). Replaces the
+        // old static "2x" batching threshold, which caused the reported 30->24->27 FPS saw-tooth: a
+        // fixed, too-high commit threshold delayed the GPU start of each frame and let the CPU race
+        // ahead until it stalled on drawable-pool exhaustion, then recovered, then repeated. Instead we
+        // read a threshold the controller maintains within [baseline, 2x baseline] using in-flight
+        // command-buffer queue depth as an AIMD signal (see UpdateAdaptiveCommitThreshold): additive
+        // increase while the GPU keeps up, multiplicative decrease the moment it falls behind — the
+        // classic converging (non-oscillating) congestion-control shape. RequestSoonCommit() still
+        // forces a prompt commit for readback / occlusion-query ordering (it overrides m_commitTreshold
+        // directly to m_recordedDrawcalls+8), and explicit commits (present/flush) call
+        // CommitCommandBuffer() unconditionally. Per-draw output is byte-identical; only submission
+        // cadence changes. When OFF this is one atomic bool read per command-buffer creation and the
+        // static baseline threshold is used (today's exact behavior).
         if (ActiveSettings::ExperimentalExtendedCommitThreshold())
-            m_commitTreshold = m_defaultCommitTreshlod * 2;
+            m_commitTreshold = m_adaptiveCommitThreshold;
 
         // Debug
         m_performanceMonitor.m_commandBuffers++;
@@ -2807,6 +2817,54 @@ void MetalRenderer::ProcessFinishedCommandBuffers()
             ++it;
         }
     }
+
+    // Adaptive Commit Cadence: fold the freshly-reaped in-flight queue depth into the batching-threshold
+    // controller (consumed by GetCommandBuffer). Toggle-gated, so this is completely inert when OFF.
+    if (ActiveSettings::ExperimentalExtendedCommitThreshold())
+        UpdateAdaptiveCommitThreshold();
+}
+
+void MetalRenderer::UpdateAdaptiveCommitThreshold()
+{
+    // Adaptive Commit Cadence controller (experimental_extended_commit_threshold). Called after the
+    // reap loop in ProcessFinishedCommandBuffers, so m_executingCommandBuffers.size() is the current
+    // count of command buffers the CPU has committed but the GPU has not finished. Because each command
+    // buffer GPU-waits on the previous one's event (see GetCommandBuffer), the GPU drains this list in
+    // order, so the depth is a direct measure of how far the CPU has run ahead of the GPU:
+    //   depth 0  -> GPU has caught up / is idle-waiting (we are CPU-bound): safe to batch a little more,
+    //               which cuts per-command-buffer submit overhead on exactly the CPU-bound frames we
+    //               care about. Additive increase.
+    //   depth 1  -> healthy "one buffer ahead" pipeline: hold (hysteresis band).
+    //   depth>=2 -> the CPU is pulling ahead of the GPU; this is the precursor to the fixed-threshold
+    //               saw-tooth (race ahead -> drawable-pool exhaustion). Multiplicative decrease toward
+    //               the baseline so command buffers commit promptly and the GPU restarts sooner.
+    // Additive-increase / multiplicative-decrease is the classic congestion-control shape: it converges
+    // to an operating point rather than sustaining the large oscillation a fixed high threshold caused.
+    // The threshold is always clamped to [baseline, 2x baseline]; the read/write here are single-threaded
+    // (render thread owns all command submission), so no atomics are needed. Signal only — never a
+    // correctness gate.
+    const uint32 baseline = m_defaultCommitTreshlod;
+    const uint32 ceiling = m_defaultCommitTreshlod * 2;
+    const size_t queueDepth = m_executingCommandBuffers.size();
+    if (queueDepth >= 2)
+    {
+        // multiplicative decrease: halve the surplus over baseline, snapping back fast
+        m_adaptiveCommitThreshold = baseline + (m_adaptiveCommitThreshold - baseline) / 2;
+    }
+    else if (queueDepth == 0)
+    {
+        // additive increase: nudge up while the GPU is not the bottleneck
+        uint32 step = baseline / 8;
+        if (step == 0)
+            step = 1;
+        m_adaptiveCommitThreshold += step;
+    }
+    // queueDepth == 1: hold.
+    // clamp to [baseline, 2x baseline] (also repairs any pre-init value)
+    if (m_adaptiveCommitThreshold < baseline)
+        m_adaptiveCommitThreshold = baseline;
+    else if (m_adaptiveCommitThreshold > ceiling)
+        m_adaptiveCommitThreshold = ceiling;
 }
 
 bool MetalRenderer::AcquireDrawable(bool mainWindow)
