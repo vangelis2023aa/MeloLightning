@@ -228,6 +228,11 @@ bool ActiveSettings::ExperimentalAdaptiveRenderWork()
 	return GetConfig().experimental_adaptive_render_work;
 }
 
+bool ActiveSettings::ExperimentalArgBufferIncrementalRefcount()
+{
+	return GetConfig().experimental_argbuffer_incremental_refcount;
+}
+
 bool ActiveSettings::ExperimentalMetalFXEnable()
 {
 	return GetConfig().experimental_metalfx_enable;

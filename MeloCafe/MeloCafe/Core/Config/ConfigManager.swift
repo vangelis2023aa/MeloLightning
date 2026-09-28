@@ -284,6 +284,15 @@ class ConfigManager: ObservableObject {
         }
     }
 
+    var experimentalArgBufferIncrementalRefcount: Binding<Bool> {
+        Binding {
+            self.config.experimentalArgBufferIncrementalRefcount
+        } set: {
+            self.config.experimentalArgBufferIncrementalRefcount = $0
+            self.objectWillChange.send()
+        }
+    }
+
     var experimentalAudioBufferBlocks: Binding<Int> {
         Binding {
             Int(self.config.experimentalAudioBufferBlocks)

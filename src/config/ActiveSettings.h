@@ -150,6 +150,7 @@ public:
 	[[nodiscard]] static bool ExperimentalWorkerTextureDecode();
 	[[nodiscard]] static bool ExperimentalPartialRendering();
 	[[nodiscard]] static bool ExperimentalAdaptiveRenderWork();
+	[[nodiscard]] static bool ExperimentalArgBufferIncrementalRefcount();
 
 	// Experimental MetalFX spatial upscaling (Metal/iOS). Read once by MetalRenderer at construction
 	// and latched; see CemuConfig experimental_metalfx_* flags.

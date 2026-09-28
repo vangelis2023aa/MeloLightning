@@ -142,6 +142,7 @@ typedef NS_ENUM(NSInteger, ObjCPrecompiledShaderOption) {
 @property (nonatomic) BOOL experimentalWorkerTextureDecode;
 @property (nonatomic) BOOL experimentalPartialRendering;
 @property (nonatomic) BOOL experimentalAdaptiveRenderWork;
+@property (nonatomic) BOOL experimentalArgBufferIncrementalRefcount;
 @property (nonatomic) int experimentalAudioBufferBlocks;
 @property (nonatomic) int experimentalAudioAntiClip;
 

@@ -7,6 +7,7 @@
 #include "Common/precompiled.h"
 #include "HW/MMU/MMU.h"
 #include "config/CemuConfig.h"
+#include "config/ActiveSettings.h"
 
 #include "Cafe/HW/Latte/Core/LatteBufferCache.h"
 
@@ -79,12 +80,37 @@ MetalSynchronizedHeapAllocator::AllocatorReservation* MetalMemoryManager::GetCac
         snapshot.encoder = encoder->retain();
     }
     
-    for (const auto& binding : bindings)
-        if (binding.resource)
-            static_cast<NS::Object*>(binding.resource)->retain();
-    for (const auto& binding : snapshot.bindings)
-        if (binding.resource)
-            static_cast<NS::Object*>(binding.resource)->release();
+    // Experimental (default OFF): adjust arg-buffer resource refcounts only for slots whose resource
+    // pointer actually changed, instead of retaining every new resource and releasing every old one.
+    // A resource present in both the old and new binding sets keeps its single snapshot reference across
+    // the transition (it is never transiently dropped), which is strictly safer than release-then-retain.
+    // Slots are index-aligned (fixed-size std::array, one [[id(i)]] each), so the comparison is valid
+    // regardless of whether the encoder changed -- it is purely about which resources the snapshot
+    // references before vs after. In busy scenes the VS arg buffer re-encodes ~every draw with only the
+    // support-buffer slot changed, so this turns ~160 atomic refcount ops per re-encode into ~2.
+    if (ActiveSettings::ExperimentalArgBufferIncrementalRefcount())
+    {
+        for (uint32 index = 0; index < bindings.size(); ++index)
+        {
+            void* newResource = bindings[index].resource;
+            void* oldResource = snapshot.bindings[index].resource;
+            if (newResource == oldResource)
+                continue;
+            if (newResource)
+                static_cast<NS::Object*>(newResource)->retain();
+            if (oldResource)
+                static_cast<NS::Object*>(oldResource)->release();
+        }
+    }
+    else
+    {
+        for (const auto& binding : bindings)
+            if (binding.resource)
+                static_cast<NS::Object*>(binding.resource)->retain();
+        for (const auto& binding : snapshot.bindings)
+            if (binding.resource)
+                static_cast<NS::Object*>(binding.resource)->release();
+    }
     snapshot.bindings = bindings;
     const uint32 alignment = std::max<uint32>(256, static_cast<uint32>(encoder->alignment()));
     snapshot.allocation = m_snapshotAllocator.AllocateBufferMemory(static_cast<uint32>(encoder->encodedLength()), alignment);

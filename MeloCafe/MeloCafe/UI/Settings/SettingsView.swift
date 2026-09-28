@@ -350,6 +350,13 @@ struct SettingsView: View {
                         }
 
                         VStack(alignment: .leading, spacing: 4) {
+                            Toggle("Incremental Argument-Buffer Refcounts", isOn: configManager.experimentalArgBufferIncrementalRefcount)
+                            Text("Metal only. In busy scenes the renderer rebuilds a shader's argument buffer almost every draw even when only one entry changed, and each rebuild retains every resource in the new set and releases every resource in the old set. This instead adjusts the reference count only for the entries that actually changed. The output is identical; it just removes a large amount of reference-counting work while drawing, which can help when the game is CPU-bound. Safe to leave on.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        VStack(alignment: .leading, spacing: 4) {
                             Toggle("Extended Command Batching", isOn: configManager.experimentalExtendedCommitThreshold)
                             Text("Metal only. Submit larger batches of GPU work per command buffer, reducing how often work is flushed to the GPU. Rendering is unchanged, but larger batches raise GPU latency and memory use, which can shift frame pacing or, in extreme scenes, trigger a GPU timeout.")
                                 .font(.caption)
