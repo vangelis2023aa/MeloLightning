@@ -105,6 +105,20 @@ typedef struct
 	LattePerfStatTimer gpuTime_semaphoreTime; // Latte-thread time blocked in IT_MEM_SEMAPHORE SEM_SIGNAL wait
 	LattePerfStatTimer gpuTime_occlusionTime; // Latte-thread time blocked on occlusion-query CB completion
 
+	// Diagnostic-only CPU-submit per-category breakdown (Metal backend). Behavior-neutral: pure
+	// begin/end timestamp brackets around real call sites in draw_execute / BindStageResources, gated
+	// by MetalRenderer::m_captureCpuStageTimings (snapshotted once per frame from config.overlay.debug)
+	// so they cost ~0 while the debug overlay is off. Read via getPreviousFrameValue() like the timers
+	// above. These decompose the "CPU submit (derived)" residual into where the Latte thread spends it.
+	LattePerfStatTimer cpuTime_dcBeginSeq;   // draw_beginSequence total (per pass): MRT/framebuffer + pass setup
+	LattePerfStatTimer cpuTime_dcIndex;      // LatteIndices_decode (index buffer decode/upload)
+	LattePerfStatTimer cpuTime_dcBufferSync; // vertex/uniform buffer cache sync + PrepareUniformBufferSizes
+	LattePerfStatTimer cpuTime_dcPipeline;   // GetRenderPipelineState (pipeline hash + lookup)
+	LattePerfStatTimer cpuTime_dcBindStage;  // BindStageResources total (all stages) - superset of the two below
+	LattePerfStatTimer cpuTime_dcArgEncode;  // GetCachedArgumentBuffer (arg-buffer encode storm) - subset of BindStage
+	LattePerfStatTimer cpuTime_dcResidency;  // DeclareResidency probes + useResource - subset of BindStage
+	LattePerfStatTimer cpuTime_dcDrawEmit;   // draw call emission (drawPrimitives/drawIndexed/drawMeshThreadgroups)
+
 	LattePerfStatTimer gpuTime_dcStageTextures; // drawcall texture/mrt setup
 	LattePerfStatTimer gpuTime_dcStageVertexMgr; // drawcall vertex setup and upload
 	LattePerfStatTimer gpuTime_dcStageShaderAndUniformMgr; // drawcall shader setup and uniform management/upload

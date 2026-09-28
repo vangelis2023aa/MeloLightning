@@ -41,6 +41,28 @@ extern bool hasValidFramebufferAttached;
 
 float supportBufferData[512 * 4];
 
+// Diagnostic-only (behavior-neutral): early-return-safe RAII bracket for the per-category CPU-submit
+// breakdown timers. When 'active' is false (debug overlay hidden) it does nothing, so normal play pays
+// zero cost. The destructor closes the bracket on every code path, including the early returns in
+// draw_execute / BindStageResources. Read out via getPreviousFrameValue() in AppendOverlayDebugInfo.
+namespace
+{
+    struct ScopedStageTimer
+    {
+        LattePerfStatTimer* m_timer;
+        ScopedStageTimer(LattePerfStatTimer& timer, bool active) : m_timer(active ? &timer : nullptr)
+        {
+            if (m_timer)
+                m_timer->beginMeasuring();
+        }
+        ~ScopedStageTimer()
+        {
+            if (m_timer)
+                m_timer->endMeasuring();
+        }
+    };
+}
+
 // Defined in the Common renderer
 void LatteDraw_handleSpecialState8_clearAsDepth();
 
@@ -518,6 +540,10 @@ void MetalRenderer::SwapBuffers(bool swapTV, bool swapDRC)
 
     // Debug
     m_performanceMonitor.ResetPerFrameData();
+
+    // Diagnostic-only: decide once per frame whether the per-category CPU-submit brackets run next frame.
+    // Gated on the debug overlay being visible so normal play pays zero cost. 1-frame latency is fine.
+    m_captureCpuStageTimings = GetConfig().overlay.debug;
 
     // GPU capture
     if (m_capturing)
@@ -1001,6 +1027,33 @@ void MetalRenderer::AppendOverlayDebugInfo()
         ImGui::Text("Flip wait (vsync pacing)     %.2f ms", flipMs);
         ImGui::Text("Shader decompile             %.2f ms", shaderMs);
         ImGui::Text("CPU submit (derived)         %.2f ms", submitMs);
+
+        // CPU-submit per-category breakdown (Metal backend). Populated only while this overlay is shown
+        // (m_captureCpuStageTimings). Each line is a real begin/end bracket around the named call site in
+        // draw_execute / BindStageResources, summed over all draws in the previous frame. dcArgEncode and
+        // dcResidency are subsets of dcBindStage; "support/uniform/tex" is the remainder of dcBindStage.
+        const double beginSeqMs  = PPCTimer_tscToMicroseconds(performanceMonitor.cpuTime_dcBeginSeq.getPreviousFrameValue()) / 1000.0;
+        const double dcIndexMs   = PPCTimer_tscToMicroseconds(performanceMonitor.cpuTime_dcIndex.getPreviousFrameValue()) / 1000.0;
+        const double bufSyncMs   = PPCTimer_tscToMicroseconds(performanceMonitor.cpuTime_dcBufferSync.getPreviousFrameValue()) / 1000.0;
+        const double pipelineMs  = PPCTimer_tscToMicroseconds(performanceMonitor.cpuTime_dcPipeline.getPreviousFrameValue()) / 1000.0;
+        const double bindStageMs = PPCTimer_tscToMicroseconds(performanceMonitor.cpuTime_dcBindStage.getPreviousFrameValue()) / 1000.0;
+        const double argEncodeMs = PPCTimer_tscToMicroseconds(performanceMonitor.cpuTime_dcArgEncode.getPreviousFrameValue()) / 1000.0;
+        const double residencyMs = PPCTimer_tscToMicroseconds(performanceMonitor.cpuTime_dcResidency.getPreviousFrameValue()) / 1000.0;
+        const double drawEmitMs  = PPCTimer_tscToMicroseconds(performanceMonitor.cpuTime_dcDrawEmit.getPreviousFrameValue()) / 1000.0;
+        double bindRemainderMs = bindStageMs - argEncodeMs - residencyMs; // support asm + snapshot + uniform loop + texture resolve
+        if (bindRemainderMs < 0.0) bindRemainderMs = 0.0;
+        const double dcAccountedMs = beginSeqMs + dcIndexMs + bufSyncMs + pipelineMs + bindStageMs + drawEmitMs;
+        ImGui::Text("  [submit split - overlay on]");
+        ImGui::Text("  beginSequence (per pass)   %.2f ms", beginSeqMs);
+        ImGui::Text("  index decode               %.2f ms", dcIndexMs);
+        ImGui::Text("  buffer/uniform sync        %.2f ms", bufSyncMs);
+        ImGui::Text("  pipeline hash+lookup       %.2f ms", pipelineMs);
+        ImGui::Text("  bindStage TOTAL            %.2f ms", bindStageMs);
+        ImGui::Text("    - arg-buffer encode      %.2f ms", argEncodeMs);
+        ImGui::Text("    - residency declare      %.2f ms", residencyMs);
+        ImGui::Text("    - support/uniform/tex    %.2f ms", bindRemainderMs);
+        ImGui::Text("  draw emit                  %.2f ms", drawEmitMs);
+        ImGui::Text("  accounted sum              %.2f ms", dcAccountedMs);
     }
 
     ImGui::Text("--- Cache debug info ---");
@@ -1750,6 +1803,8 @@ void MetalRenderer::streamout_rendererFinishDrawcall()
 
 void MetalRenderer::draw_beginSequence()
 {
+    // Diagnostic-only: RAII at function scope times the whole per-pass setup (incl. all early returns).
+    ScopedStageTimer _stBeginSeq(performanceMonitor.cpuTime_dcBeginSeq, m_captureCpuStageTimings);
     m_state.m_skipDrawSequence = false;
 
     m_performanceMonitor.m_drawPassBegins++;
@@ -1872,7 +1927,10 @@ void MetalRenderer::draw_execute(uint32 baseVertex, uint32 baseInstance, uint32 
     uint32 indexMin = 0;
     uint32 indexMax = 0;
     Renderer::IndexAllocation indexAllocation;
-    LatteIndices_decode(memory_getPointerFromVirtualOffset(indexDataMPTR), indexType, count, primitiveMode, indexMin, indexMax, hostIndexType, hostIndexCount, indexAllocation);
+    {
+        ScopedStageTimer _stIndex(performanceMonitor.cpuTime_dcIndex, m_captureCpuStageTimings);
+        LatteIndices_decode(memory_getPointerFromVirtualOffset(indexDataMPTR), indexType, count, primitiveMode, indexMin, indexMax, hostIndexType, hostIndexCount, indexAllocation);
+    }
     auto indexAllocationMtl = static_cast<MetalSynchronizedHeapAllocator::AllocatorReservation*>(indexAllocation.rendererInternal);
     const sint32 signedBaseVertex = static_cast<sint32>(baseVertex);
     m_state.m_drawResources.indexBuffer = indexAllocationMtl ? indexAllocationMtl->mtlBuffer : nullptr;
@@ -1893,6 +1951,7 @@ void MetalRenderer::draw_execute(uint32 baseVertex, uint32 baseInstance, uint32 
     }
 
     // Buffer cache
+    if (m_captureCpuStageTimings) performanceMonitor.cpuTime_dcBufferSync.beginMeasuring();
     if (m_memoryManager->UseHostMemoryForCache())
     {
         // direct memory access (Wii U memory space imported as a buffer), update buffer bindings
@@ -1917,12 +1976,17 @@ void MetalRenderer::draw_execute(uint32 baseVertex, uint32 baseInstance, uint32 
     if (usesGeometryShader)
         PrepareUniformBufferSizes(geometryShader);
     PrepareUniformBufferSizes(pixelShader);
+    if (m_captureCpuStageTimings) performanceMonitor.cpuTime_dcBufferSync.endMeasuring();
 
     // Render pass
     auto renderCommandEncoder = GetRenderCommandEncoder();
 
     // Render pipeline state
-    PipelineObject* pipelineObj = m_pipelineCache->GetRenderPipelineState(fetchShader, vertexShader, geometryShader, pixelShader, m_state.m_lastUsedFBO.m_attachmentsInfo, m_state.m_activeFBO.m_attachmentsInfo, m_state.m_activeFBO.m_fbo->m_size, count, LatteGPUState.contextNew);
+    PipelineObject* pipelineObj;
+    {
+        ScopedStageTimer _stPipeline(performanceMonitor.cpuTime_dcPipeline, m_captureCpuStageTimings);
+        pipelineObj = m_pipelineCache->GetRenderPipelineState(fetchShader, vertexShader, geometryShader, pixelShader, m_state.m_lastUsedFBO.m_attachmentsInfo, m_state.m_activeFBO.m_attachmentsInfo, m_state.m_activeFBO.m_fbo->m_size, count, LatteGPUState.contextNew);
+    }
     if (!pipelineObj->m_pipeline)
         return;
 
@@ -2145,9 +2209,16 @@ void MetalRenderer::draw_execute(uint32 baseVertex, uint32 baseInstance, uint32 
     LatteStreamout_PrepareDrawcall(streamoutVertexCount, instanceCount);
 
     // Uniform buffers, textures and samplers
-    if (!BindStageResources(renderCommandEncoder, vertexShader, usesGeometryShader) ||
-        (usesGeometryShader && geometryShader && !BindStageResources(renderCommandEncoder, geometryShader, usesGeometryShader)) ||
-        !BindStageResources(renderCommandEncoder, pixelShader, usesGeometryShader))
+    bool bindStageOk;
+    {
+        ScopedStageTimer _stBind(performanceMonitor.cpuTime_dcBindStage, m_captureCpuStageTimings);
+        // Preserves the original short-circuit semantics exactly: fail if VS fails, or (when a geometry
+        // stage applies) GS fails, or PS fails - and calls each stage in the same order / only when reached.
+        bindStageOk = BindStageResources(renderCommandEncoder, vertexShader, usesGeometryShader) &&
+                      (!(usesGeometryShader && geometryShader) || BindStageResources(renderCommandEncoder, geometryShader, usesGeometryShader)) &&
+                      BindStageResources(renderCommandEncoder, pixelShader, usesGeometryShader);
+    }
+    if (!bindStageOk)
     {
         streamout_rendererFinishDrawcall();
         LatteGPUState.drawCallCounter++;
@@ -2162,6 +2233,7 @@ void MetalRenderer::draw_execute(uint32 baseVertex, uint32 baseInstance, uint32 
     }
 
     // Draw
+    if (m_captureCpuStageTimings) performanceMonitor.cpuTime_dcDrawEmit.beginMeasuring();
     if (usesGeometryShader)
     {
         if (hostIndexType != INDEX_TYPE::NONE && vertexShader->resourceMapping.argumentBufferBindingPoint < 0)
@@ -2218,6 +2290,7 @@ void MetalRenderer::draw_execute(uint32 baseVertex, uint32 baseInstance, uint32 
               renderCommandEncoder->drawPrimitives(mtlPrimitiveType, baseVertex, count, instanceCount, baseInstance);
            }
     }
+    if (m_captureCpuStageTimings) performanceMonitor.cpuTime_dcDrawEmit.endMeasuring();
 
     m_state.m_isFirstDrawInRenderPass = false;
 
@@ -3136,6 +3209,9 @@ void MetalRenderer::PrepareUniformBufferSizes(LatteDecompilerShader* shader)
 
 void MetalRenderer::DeclareResidency(MTL::RenderCommandEncoder* enc, const MTL::Resource* resource, MTL::ResourceUsage usage, MTL::RenderStages stage)
 {
+    // Diagnostic-only: all DeclareResidency calls originate inside BindStageResources, so this timer is a
+    // clean subset of cpuTime_dcBindStage. RAII at function scope times every return path. Zero cost off.
+    ScopedStageTimer _stRes(performanceMonitor.cpuTime_dcResidency, m_captureCpuStageTimings);
     // OFF path (point (f)): behaviorally identical to the original call sites - a direct useResource
     // with the same resource pointer, usage, and stage. m_residentResources stays empty and is never
     // consulted, so with the toggle off this path matches the previous code exactly.
@@ -3574,7 +3650,11 @@ bool MetalRenderer::BindStageResources(MTL::RenderCommandEncoder* renderCommandE
         // The "Skip Redundant GPU Residency" experimental toggle only removes the *repeat*
         // declarations of an already-resident resource on the same encoder (via DeclareResidency); the
         // first declaration on each encoder still happens, so this path is unchanged when the toggle is OFF.
-        auto* allocation = m_memoryManager->GetCachedArgumentBuffer(mtlShaderType, argumentEncoder, argumentBindings);
+        MetalSynchronizedHeapAllocator::AllocatorReservation* allocation;
+        {
+            ScopedStageTimer _stArg(performanceMonitor.cpuTime_dcArgEncode, m_captureCpuStageTimings);
+            allocation = m_memoryManager->GetCachedArgumentBuffer(mtlShaderType, argumentEncoder, argumentBindings);
+        }
         SetBuffer(renderCommandEncoder, mtlShaderType, allocation->mtlBuffer, allocation->bufferOffset, shader->resourceMapping.argumentBufferBindingPoint);
     }
     return true;

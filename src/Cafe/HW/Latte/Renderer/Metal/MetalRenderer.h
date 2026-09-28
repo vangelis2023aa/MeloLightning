@@ -704,6 +704,11 @@ private:
 	bool m_captureFrame = false;
 	bool m_capturing = false;
 
+	// Diagnostic-only: snapshotted once per frame (in SwapBuffers) from config.overlay.debug. When false,
+	// the per-category CPU-submit timing brackets in draw_execute/BindStageResources are skipped entirely,
+	// so they add zero cost while the debug overlay is not shown. Behavior-neutral in all cases.
+	bool m_captureCpuStageTimings = false;
+
 	// Helpers
 	MetalLayerHandle& GetLayer(bool mainWindow)
 	{

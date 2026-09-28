@@ -15,6 +15,16 @@ void LattePerformanceMonitor_frameEnd()
 	performanceMonitor.gpuTime_semaphoreTime.frameFinished();
 	performanceMonitor.gpuTime_occlusionTime.frameFinished();
 
+	// Diagnostic-only CPU-submit per-category breakdown (Metal backend); behavior-neutral.
+	performanceMonitor.cpuTime_dcBeginSeq.frameFinished();
+	performanceMonitor.cpuTime_dcIndex.frameFinished();
+	performanceMonitor.cpuTime_dcBufferSync.frameFinished();
+	performanceMonitor.cpuTime_dcPipeline.frameFinished();
+	performanceMonitor.cpuTime_dcBindStage.frameFinished();
+	performanceMonitor.cpuTime_dcArgEncode.frameFinished();
+	performanceMonitor.cpuTime_dcResidency.frameFinished();
+	performanceMonitor.cpuTime_dcDrawEmit.frameFinished();
+
 	performanceMonitor.gpuTime_dcStageTextures.frameFinished();
 	performanceMonitor.gpuTime_dcStageVertexMgr.frameFinished();
 	performanceMonitor.gpuTime_dcStageShaderAndUniformMgr.frameFinished();
