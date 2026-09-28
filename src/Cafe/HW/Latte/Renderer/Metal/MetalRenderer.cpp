@@ -23,6 +23,8 @@
 #include "Cemu/Logging/CemuLogging.h"
 #include "Cafe/HW/Latte/Core/FetchShader.h"
 #include "Cafe/HW/Latte/Core/LatteConst.h"
+#include "Cafe/HW/Latte/Core/LattePerformanceMonitor.h"
+#include "util/highresolutiontimer/HighResolutionTimer.h"
 #include "config/CemuConfig.h"
 #include "config/ActiveSettings.h"
 #include "WindowSystem.h"
@@ -499,6 +501,11 @@ void MetalRenderer::DrawEmptyFrame(bool mainWindow)
 
 void MetalRenderer::SwapBuffers(bool swapTV, bool swapDRC)
 {
+    // Diagnostic-only (behavior-neutral): wall-clock around drawable acquisition + PresentDrawable +
+    // final command-buffer commit. Does NOT include the vsync pacing wait (that is IT_HLE_WAIT_FOR_FLIP,
+    // measured separately as gpuTime_flipTime). Written once per frame; ResetPerFrameData does not clear
+    // it, so it holds this value for the next frame's overlay draw (1-frame display lag).
+    const HRTick presentStartTick = HighResolutionTimer::now().getTick();
     if (swapTV)
         SwapBuffer(true);
     if (swapDRC)
@@ -506,6 +513,8 @@ void MetalRenderer::SwapBuffers(bool swapTV, bool swapDRC)
 
     // Reset the command buffers (they are released by TemporaryBufferAllocator)
     CommitCommandBuffer();
+    const HRTick presentEndTick = HighResolutionTimer::now().getTick();
+    m_performanceMonitor.m_presentTimeNs = (uint64)(HighResolutionTimer::getTimeDiff(presentStartTick, presentEndTick) * 1000000000.0);
 
     // Debug
     m_performanceMonitor.ResetPerFrameData();
@@ -959,6 +968,40 @@ void MetalRenderer::AppendOverlayDebugInfo()
         ImGui::Text("Draws per pass             %.2f", drawsPerPass);
     }
     ImGui::Text("Snapshot misses            %u", m_performanceMonitor.m_snapshotMisses);
+
+    ImGui::Text("--- Frame budget (per frame, prev) ---");
+    {
+        // All LattePerfStatTimer values are the PREVIOUS completed frame (getPreviousFrameValue), converted
+        // from TSC ticks to microseconds. The per-frame COUNTS above are the CURRENT frame (reset in
+        // ResetPerFrameData), so there is a 1-frame skew between the two groups - acceptable for a diagnostic.
+        // Every line is a real measured span (timestamps around actual wait/sync/present points) or a real
+        // GPU timestamp, NOT an estimate, except the single line explicitly marked "(derived)".
+        const double frameSpanMs = PPCTimer_tscToMicroseconds(performanceMonitor.gpuTime_frameTime.getPreviousFrameValue()) / 1000.0;
+        const double idleMs      = PPCTimer_tscToMicroseconds(performanceMonitor.gpuTime_idleTime.getPreviousFrameValue()) / 1000.0;
+        const double fenceMs     = PPCTimer_tscToMicroseconds(performanceMonitor.gpuTime_fenceTime.getPreviousFrameValue()) / 1000.0;
+        const double readbackMs  = PPCTimer_tscToMicroseconds(performanceMonitor.gpuTime_waitForAsync.getPreviousFrameValue()) / 1000.0;
+        const double flipMs      = PPCTimer_tscToMicroseconds(performanceMonitor.gpuTime_flipTime.getPreviousFrameValue()) / 1000.0;
+        const double semaphoreMs = PPCTimer_tscToMicroseconds(performanceMonitor.gpuTime_semaphoreTime.getPreviousFrameValue()) / 1000.0;
+        const double occlusionMs = PPCTimer_tscToMicroseconds(performanceMonitor.gpuTime_occlusionTime.getPreviousFrameValue()) / 1000.0;
+        const double shaderMs    = PPCTimer_tscToMicroseconds(performanceMonitor.gpuTime_shaderCreate.getPreviousFrameValue()) / 1000.0;
+        const double presentMs   = m_performanceMonitor.m_presentTimeNs / 1000000.0;
+        const double gpuActiveMs = m_performanceMonitor.m_gpuActiveUs / 1000.0;
+        const double waitSumMs   = idleMs + fenceMs + readbackMs + flipMs + semaphoreMs + occlusionMs + shaderMs;
+        double submitMs = frameSpanMs - waitSumMs; // CPU work on the Latte thread not covered by a named wait
+        if (submitMs < 0.0) submitMs = 0.0;
+        ImGui::Text("Latte frame span (excl pres) %.2f ms", frameSpanMs);
+        ImGui::Text("Present acq+present+commit   %.2f ms", presentMs);
+        ImGui::Text("Frame total span+present     %.2f ms", frameSpanMs + presentMs);
+        ImGui::Text("GPU active (reaped CBs)      %.2f ms (%u CB)", gpuActiveMs, m_performanceMonitor.m_gpuActiveCBs);
+        ImGui::Text("Ring idle (guest starve)     %.2f ms", idleMs);
+        ImGui::Text("Fence wait (WAIT_REG_MEM)    %.2f ms", fenceMs);
+        ImGui::Text("Semaphore wait (MEM_SEM)     %.2f ms", semaphoreMs);
+        ImGui::Text("Readback wait (async)        %.2f ms", readbackMs);
+        ImGui::Text("Occlusion wait (CB done)     %.2f ms", occlusionMs);
+        ImGui::Text("Flip wait (vsync pacing)     %.2f ms", flipMs);
+        ImGui::Text("Shader decompile             %.2f ms", shaderMs);
+        ImGui::Text("CPU submit (derived)         %.2f ms", submitMs);
+    }
 
     ImGui::Text("--- Cache debug info ---");
 
@@ -2384,7 +2427,11 @@ void MetalRenderer::PrepareOcclusionQueryDraw()
     {
 
         if (!CommandBufferCompleted(completion))
+        {
+            performanceMonitor.gpuTime_occlusionTime.beginMeasuring(); // diagnostic-only (behavior-neutral)
             completion->waitUntilCompleted();
+            performanceMonitor.gpuTime_occlusionTime.endMeasuring();
+        }
 
         for (auto* query : m_occlusionQuery.m_queries)
             query->AccumulateBuffer(nextBuffer);
@@ -2400,7 +2447,11 @@ void MetalRenderer::PrepareOcclusionQueryDraw()
 void MetalRenderer::occlusionQuery_flush() {
     CommitCommandBuffer();
     if (m_occlusionQuery.m_lastCommandBuffer)
+    {
+        performanceMonitor.gpuTime_occlusionTime.beginMeasuring(); // diagnostic-only (behavior-neutral)
         m_occlusionQuery.m_lastCommandBuffer->waitUntilCompleted();
+        performanceMonitor.gpuTime_occlusionTime.endMeasuring();
+    }
 }
 
 void MetalRenderer::occlusionQuery_updateState() {
@@ -2878,6 +2929,18 @@ void MetalRenderer::ProcessFinishedCommandBuffers()
         auto commandBuffer = *it;
         if (CommandBufferCompleted(commandBuffer))
         {
+            // Diagnostic-only (behavior-neutral): accumulate real GPU execution time from the completed
+            // command buffer's timestamps. No completion handler and no added synchronization are needed -
+            // the CB is already Completed here. CBs are serialized on the GPU (each encodeWaits the prior
+            // one's MTL::Event, see GetCommandBuffer), so summing per-CB (end-start) spans approximates GPU
+            // wall-clock busy time for the frame window. Guard against unset/zero timestamps (e.g. Error).
+            const double gpuStart = commandBuffer->GPUStartTime();
+            const double gpuEnd = commandBuffer->GPUEndTime();
+            if (gpuStart > 0.0 && gpuEnd > gpuStart)
+            {
+                m_performanceMonitor.m_gpuActiveAccumUs += (gpuEnd - gpuStart) * 1000000.0;
+                m_performanceMonitor.m_gpuActiveAccumCBs++;
+            }
             m_memoryManager->CleanupBuffers(commandBuffer);
             commandBuffer->release();
             it = m_executingCommandBuffers.erase(it);

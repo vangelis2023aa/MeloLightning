@@ -99,6 +99,11 @@ typedef struct
 	LattePerfStatTimer gpuTime_shaderCreate;
 	LattePerfStatTimer gpuTime_idleTime; // time spent waiting for new commands from CPU
 	LattePerfStatTimer gpuTime_fenceTime; // time spent waiting for fence condition
+	// Diagnostic-only frame-budget timers (behavior-neutral; see AppendOverlayDebugInfo). All read via
+	// getPreviousFrameValue()->PPCTimer_tscToMicroseconds, same as the timers above.
+	LattePerfStatTimer gpuTime_flipTime; // Latte-thread time blocked in IT_HLE_WAIT_FOR_FLIP (vsync frame pacing)
+	LattePerfStatTimer gpuTime_semaphoreTime; // Latte-thread time blocked in IT_MEM_SEMAPHORE SEM_SIGNAL wait
+	LattePerfStatTimer gpuTime_occlusionTime; // Latte-thread time blocked on occlusion-query CB completion
 
 	LattePerfStatTimer gpuTime_dcStageTextures; // drawcall texture/mrt setup
 	LattePerfStatTimer gpuTime_dcStageVertexMgr; // drawcall vertex setup and upload

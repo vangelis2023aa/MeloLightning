@@ -759,6 +759,7 @@ LatteCMDPtr LatteCP_itMemSemaphore(LatteCMDPtr cmd, uint32 nWords)
 		const uint32 kMemSemaphoreBackoffMaxUs    = aggressive ? 500 :  250; // hard cap so the signal is never materially delayed
 		LatteCP_signalEnterWait();
 		uint64 waitIterations = 0;
+		performanceMonitor.gpuTime_semaphoreTime.beginMeasuring(); // diagnostic-only (behavior-neutral)
 		while (true)
 		{
 			uint64le oldVal = semaphoreData->load();
@@ -780,6 +781,7 @@ LatteCMDPtr LatteCP_itMemSemaphore(LatteCMDPtr cmd, uint32 nWords)
 			if (semaphoreData->compare_exchange_strong(oldVal, oldVal - 1))
 				break;
 		}
+		performanceMonitor.gpuTime_semaphoreTime.endMeasuring(); // diagnostic-only (behavior-neutral)
 	}
 	else
 	{
@@ -1120,6 +1122,7 @@ LatteCMDPtr LatteCP_itHLEWaitForFlip(LatteCMDPtr cmd, uint32 nWords)
 	if (aggressiveFramePacing)
 		watchdogStartTick = watchdogPrevTick = HighResolutionTimer::now().getTick();
 	constexpr uint64 kWatchdogTimeoutUs = 4ull * 1000ull * 1000ull;
+	performanceMonitor.gpuTime_flipTime.beginMeasuring(); // diagnostic-only (behavior-neutral): vsync frame-pacing sink
 	while (true)
 	{
 		if (currentFlipCount != LatteGPUState.flipCounter)
@@ -1167,6 +1170,7 @@ LatteCMDPtr LatteCP_itHLEWaitForFlip(LatteCMDPtr cmd, uint32 nWords)
 			}
 		}
 	}
+	performanceMonitor.gpuTime_flipTime.endMeasuring(); // diagnostic-only (behavior-neutral)
 	return cmd;
 }
 

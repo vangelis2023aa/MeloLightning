@@ -19,6 +19,27 @@ public:
     uint32 m_drawPassBegins = 0; // CP continuous-draw-pass begins this frame (fragmentation numerator)
     uint32 m_snapshotMisses = 0; // snapshot cache misses (re-copies) this frame
 
+    // Developer-only frame-budget diagnostics (see AppendOverlayDebugInfo). Behavior-neutral: read only.
+    //
+    // GPU execution time: measured from MTL::CommandBuffer::GPUStartTime()/GPUEndTime() read off each
+    // command buffer as it is reaped (status==Completed) in ProcessFinishedCommandBuffers. This is real
+    // GPU-domain time, NOT a CPU estimate. Because every command buffer GPU-waits on the previous one's
+    // event (encodeWait in GetCommandBuffer), the CBs do not overlap on the GPU, so the sum of per-CB
+    // (end-start) spans approximates GPU wall-clock busy time for the frame. It is APPROXIMATE only in
+    // that CB reaping can straddle a frame boundary (a CB submitted late in frame N may be reaped in
+    // N+1); accumulate during the frame, snapshot at ResetPerFrameData.
+    double m_gpuActiveUs = 0.0;       // display: summed GPU exec time of CBs reaped this frame window (us)
+    uint32 m_gpuActiveCBs = 0;        // display: number of CBs contributing to m_gpuActiveUs
+    double m_gpuActiveAccumUs = 0.0;  // accumulator (rolled into m_gpuActiveUs at frame end)
+    uint32 m_gpuActiveAccumCBs = 0;   // accumulator
+    // Present cost: wall-clock (CLOCK_MONOTONIC_RAW) around the SwapBuffer()s + final CommitCommandBuffer
+    // in SwapBuffers(). Captures drawable acquisition + PresentDrawable + final commit. This is CPU
+    // wall-clock on the Latte thread. It does NOT include the vsync pacing wait (that is IT_HLE_WAIT_FOR_FLIP,
+    // measured separately as gpuTime_flipTime). Written once per frame in SwapBuffers and intentionally NOT
+    // cleared by ResetPerFrameData, so it holds the previous frame's value for display (1-frame display lag,
+    // matching the getPreviousFrameValue() LattePerfStatTimers).
+    uint64 m_presentTimeNs = 0;       // display: present + drawable acquire + final commit (ns)
+
     MetalPerformanceMonitor() = default;
     ~MetalPerformanceMonitor() = default;
 
@@ -37,5 +58,11 @@ public:
         m_drawCalls = 0;
         m_drawPassBegins = 0;
         m_snapshotMisses = 0;
+        // Snapshot the GPU-active accumulator into the displayed value, then reset the accumulator for the
+        // next frame. m_presentTimeNs is deliberately left untouched (it is set directly in SwapBuffers).
+        m_gpuActiveUs = m_gpuActiveAccumUs;
+        m_gpuActiveCBs = m_gpuActiveAccumCBs;
+        m_gpuActiveAccumUs = 0.0;
+        m_gpuActiveAccumCBs = 0;
     }
 };

@@ -11,6 +11,9 @@ void LattePerformanceMonitor_frameEnd()
 	performanceMonitor.gpuTime_frameTime.frameFinished();
 	performanceMonitor.gpuTime_idleTime.frameFinished();
 	performanceMonitor.gpuTime_fenceTime.frameFinished();
+	performanceMonitor.gpuTime_flipTime.frameFinished();
+	performanceMonitor.gpuTime_semaphoreTime.frameFinished();
+	performanceMonitor.gpuTime_occlusionTime.frameFinished();
 
 	performanceMonitor.gpuTime_dcStageTextures.frameFinished();
 	performanceMonitor.gpuTime_dcStageVertexMgr.frameFinished();
