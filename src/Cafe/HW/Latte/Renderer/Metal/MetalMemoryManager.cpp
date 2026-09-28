@@ -60,6 +60,28 @@ MetalSynchronizedHeapAllocator::AllocatorReservation* MetalMemoryManager::GetCac
     return snapshot.allocation;
 }
 
+static void EncodeArgumentBufferSlot(MTL::ArgumentEncoder* encoder, const MetalArgumentBinding& binding, uint32 index)
+{
+    switch (binding.type)
+    {
+        case MetalArgumentBinding::Type::Unused:
+            break;
+        case MetalArgumentBinding::Type::Buffer:
+            encoder->setBuffer(static_cast<MTL::Buffer*>(binding.resource), binding.value, index);
+            break;
+        case MetalArgumentBinding::Type::Texture:
+            encoder->setTexture(static_cast<MTL::Texture*>(binding.resource), index);
+            break;
+        case MetalArgumentBinding::Type::Sampler:
+            encoder->setSamplerState(static_cast<MTL::SamplerState*>(binding.resource), index);
+            break;
+        case MetalArgumentBinding::Type::Constant:
+            if (void* constant = encoder->constantData(index))
+                *static_cast<uint32*>(constant) = static_cast<uint32>(binding.value);
+            break;
+    }
+}
+
 MetalSynchronizedHeapAllocator::AllocatorReservation* MetalMemoryManager::GetCachedArgumentBuffer(uint32 stage, MTL::ArgumentEncoder* encoder, const MetalArgumentBindings& bindings)
 {
     cemu_assert_debug(stage < METAL_SHADER_TYPE_TOTAL);
@@ -71,9 +93,9 @@ MetalSynchronizedHeapAllocator::AllocatorReservation* MetalMemoryManager::GetCac
         return snapshot.allocation;
     }
     
-    if (snapshot.allocation)
-        m_snapshotAllocator.FreeReservation(snapshot.allocation);
-    if (snapshot.encoder != encoder)
+    const bool sameEncoder = (snapshot.encoder == encoder);
+    auto* oldAllocation = snapshot.allocation; // freed below, after any partial-encode memcpy has read it
+    if (!sameEncoder)
     {
         if (snapshot.encoder)
             snapshot.encoder->release();
@@ -111,38 +133,59 @@ MetalSynchronizedHeapAllocator::AllocatorReservation* MetalMemoryManager::GetCac
             if (binding.resource)
                 static_cast<NS::Object*>(binding.resource)->release();
     }
-    snapshot.bindings = bindings;
     const uint32 alignment = std::max<uint32>(256, static_cast<uint32>(encoder->alignment()));
-    snapshot.allocation = m_snapshotAllocator.AllocateBufferMemory(static_cast<uint32>(encoder->encodedLength()), alignment);
-    auto* allocation = snapshot.allocation;
-    std::memset(allocation->memPtr, 0, allocation->size);
-    encoder->setArgumentBuffer(allocation->mtlBuffer, allocation->bufferOffset);
-    for (uint32 index = 0; index < bindings.size(); ++index)
+    const uint32 encodedLength = static_cast<uint32>(encoder->encodedLength());
+
+    // Experimental (default OFF): partial argument-buffer re-encode. When the encoder (i.e. the arg-buffer
+    // layout) is unchanged and the previously-encoded allocation still exists, allocate a FRESH region
+    // (arg buffers are read by the GPU at draw-execution time, so mutating the live one is unsafe), copy
+    // the previously-encoded bytes into it, then re-encode ONLY the slots whose binding changed -- skipping
+    // the whole-buffer memset and the ~40/88 per-slot setX calls that dominate the busy-scene VS re-encode
+    // storm (where typically only the support-buffer slot changes per draw). ASSUMPTION (holds on Apple
+    // Silicon in practice but is undocumented as a guarantee): encoded arg-buffer bytes are position-
+    // independent, so an unchanged slot's bytes stay valid after being memcpy'd into a different
+    // allocation/offset. This cannot be validated without on-device testing -> the Settings entry is OFF by
+    // default and carries a compatibility warning.
+    bool didPartialEncode = false;
+    if (ActiveSettings::ExperimentalArgBufferPartialEncode() && sameEncoder && oldAllocation)
     {
-        const auto& binding = bindings[index];
-        switch (binding.type)
+        // Same encoder => identical layout => per-slot binding TYPES are invariant (only the resource/value
+        // within a slot changes). Guard defensively: any type mismatch falls back to the full path.
+        bool layoutStable = true;
+        for (uint32 index = 0; index < bindings.size(); ++index)
+            if (bindings[index].type != snapshot.bindings[index].type) { layoutStable = false; break; }
+        if (layoutStable)
         {
-            case MetalArgumentBinding::Type::Unused:
-                break;
-            case MetalArgumentBinding::Type::Buffer:
-                encoder->setBuffer(static_cast<MTL::Buffer*>(binding.resource), binding.value, index);
-                break;
-            case MetalArgumentBinding::Type::Texture:
-                encoder->setTexture(static_cast<MTL::Texture*>(binding.resource), index);
-                break;
-            case MetalArgumentBinding::Type::Sampler:
-                encoder->setSamplerState(static_cast<MTL::SamplerState*>(binding.resource), index);
-                break;
-            case MetalArgumentBinding::Type::Constant:
-                if (void* constant = encoder->constantData(index))
-                    *static_cast<uint32*>(constant) = static_cast<uint32>(binding.value);
-                break;
+            // Allocate the new region BEFORE freeing the old one so the two can never alias.
+            auto* newAllocation = m_snapshotAllocator.AllocateBufferMemory(encodedLength, alignment);
+            std::memcpy(newAllocation->memPtr, oldAllocation->memPtr, encodedLength);
+            encoder->setArgumentBuffer(newAllocation->mtlBuffer, newAllocation->bufferOffset);
+            for (uint32 index = 0; index < bindings.size(); ++index)
+            {
+                if (bindings[index] == snapshot.bindings[index])
+                    continue;
+                EncodeArgumentBufferSlot(encoder, bindings[index], index);
+            }
+            m_snapshotAllocator.FreeReservation(oldAllocation);
+            snapshot.allocation = newAllocation;
+            didPartialEncode = true;
         }
     }
-    
-    m_snapshotAllocator.FlushReservation(allocation);
+
+    if (!didPartialEncode)
+    {
+        if (oldAllocation)
+            m_snapshotAllocator.FreeReservation(oldAllocation);
+        snapshot.allocation = m_snapshotAllocator.AllocateBufferMemory(encodedLength, alignment);
+        std::memset(snapshot.allocation->memPtr, 0, snapshot.allocation->size);
+        encoder->setArgumentBuffer(snapshot.allocation->mtlBuffer, snapshot.allocation->bufferOffset);
+        for (uint32 index = 0; index < bindings.size(); ++index)
+            EncodeArgumentBufferSlot(encoder, bindings[index], index);
+    }
+    snapshot.bindings = bindings;
+    m_snapshotAllocator.FlushReservation(snapshot.allocation);
     m_mtlr->GetPerformanceMonitor().m_argumentBufferEncodes++;
-    return allocation;
+    return snapshot.allocation;
 }
 
 void* MetalMemoryManager::AcquireTextureUploadBuffer(size_t size)

@@ -293,6 +293,15 @@ class ConfigManager: ObservableObject {
         }
     }
 
+    var experimentalArgBufferPartialEncode: Binding<Bool> {
+        Binding {
+            self.config.experimentalArgBufferPartialEncode
+        } set: {
+            self.config.experimentalArgBufferPartialEncode = $0
+            self.objectWillChange.send()
+        }
+    }
+
     var experimentalAudioBufferBlocks: Binding<Int> {
         Binding {
             Int(self.config.experimentalAudioBufferBlocks)

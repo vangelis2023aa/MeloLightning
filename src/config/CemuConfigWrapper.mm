@@ -200,6 +200,8 @@ static CPUMode toCPUMode(ObjCCPUMode mode) {
 - (void)setExperimentalAdaptiveRenderWork:(BOOL)v { GetConfig().experimental_adaptive_render_work = v; autoSave(); }
 - (BOOL)experimentalArgBufferIncrementalRefcount { return GetConfig().experimental_argbuffer_incremental_refcount.GetValue(); }
 - (void)setExperimentalArgBufferIncrementalRefcount:(BOOL)v { GetConfig().experimental_argbuffer_incremental_refcount = v; autoSave(); }
+- (BOOL)experimentalArgBufferPartialEncode { return GetConfig().experimental_argbuffer_partial_encode.GetValue(); }
+- (void)setExperimentalArgBufferPartialEncode:(BOOL)v { GetConfig().experimental_argbuffer_partial_encode = v; autoSave(); }
 
 - (int)experimentalAudioBufferBlocks       { return GetConfig().experimental_audio_buffer_blocks.GetValue(); }
 - (void)setExperimentalAudioBufferBlocks:(int)v { GetConfig().experimental_audio_buffer_blocks = v; autoSave(); }

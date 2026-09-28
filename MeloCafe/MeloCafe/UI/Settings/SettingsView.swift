@@ -357,6 +357,13 @@ struct SettingsView: View {
                         }
 
                         VStack(alignment: .leading, spacing: 4) {
+                            Toggle("Partial Argument-Buffer Re-Encode", isOn: configManager.experimentalArgBufferPartialEncode)
+                            Text("Metal only. Experimental. When the renderer rebuilds a shader's argument buffer and only a few entries changed, reuse the previously-encoded buffer and re-write just the changed entries, instead of clearing and re-writing all ~40–88 of them every draw. This removes a large amount of per-draw CPU work in busy scenes. It relies on an assumption about how Apple encodes argument buffers that cannot be verified without testing on your device, so it is off by default. Warning: if a game shows wrong or corrupted geometry, textures, or shading, turn this off.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        VStack(alignment: .leading, spacing: 4) {
                             Toggle("Extended Command Batching", isOn: configManager.experimentalExtendedCommitThreshold)
                             Text("Metal only. Submit larger batches of GPU work per command buffer, reducing how often work is flushed to the GPU. Rendering is unchanged, but larger batches raise GPU latency and memory use, which can shift frame pacing or, in extreme scenes, trigger a GPU timeout.")
                                 .font(.caption)

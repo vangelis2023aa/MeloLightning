@@ -233,6 +233,11 @@ bool ActiveSettings::ExperimentalArgBufferIncrementalRefcount()
 	return GetConfig().experimental_argbuffer_incremental_refcount;
 }
 
+bool ActiveSettings::ExperimentalArgBufferPartialEncode()
+{
+	return GetConfig().experimental_argbuffer_partial_encode;
+}
+
 bool ActiveSettings::ExperimentalMetalFXEnable()
 {
 	return GetConfig().experimental_metalfx_enable;
