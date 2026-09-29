@@ -25,6 +25,13 @@ public:
     // Direct Shader Bindings is OFF, since only direct-ABI stages are eligible). As it rises it should track the
     // number of draws-after-the-first within passes; it is the direct evidence the per-draw bind scan was elided.
     uint32 m_bindLoopSkips = 0;
+    // Experimental "Support Buffer Indirection" proof counter (experimental_support_buffer_indirection): number
+    // of BindStageResources calls this frame that bound the support buffer DIRECTLY for a shader that is still on
+    // the argument buffer (i.e. the support buffer was pulled out of the arg buffer to a dedicated slot). 0 when
+    // the toggle is OFF (every arg-buffer shader keeps its support buffer inside the arg buffer). As it rises,
+    // m_argumentBufferReuses should rise and m_argumentBufferEncodes should fall by roughly the same amount --
+    // that pair is the direct evidence the per-draw whole-stage arg-buffer re-encode storm was eliminated.
+    uint32 m_supportIndirectionDraws = 0;
     // Developer-only fragmentation counters (see AppendOverlayDebugInfo). Observation only.
     uint32 m_drawCalls = 0;      // guest draws submitted to draw_execute this frame
     uint32 m_drawPassBegins = 0; // CP continuous-draw-pass begins this frame (fragmentation numerator)
@@ -68,6 +75,7 @@ public:
         m_argumentBufferReuses = 0;
         m_directBindingDraws = 0;
         m_bindLoopSkips = 0;
+        m_supportIndirectionDraws = 0;
         m_drawCalls = 0;
         m_drawPassBegins = 0;
         m_snapshotMisses = 0;

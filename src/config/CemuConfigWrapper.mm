@@ -206,6 +206,8 @@ static CPUMode toCPUMode(ObjCCPUMode mode) {
 - (void)setExperimentalDirectVolatileBindings:(BOOL)v { GetConfig().experimental_direct_volatile_bindings = v; autoSave(); }
 - (BOOL)experimentalBindingDirtyMasks { return GetConfig().experimental_binding_dirty_masks.GetValue(); }
 - (void)setExperimentalBindingDirtyMasks:(BOOL)v { GetConfig().experimental_binding_dirty_masks = v; autoSave(); }
+- (BOOL)experimentalSupportBufferIndirection { return GetConfig().experimental_support_buffer_indirection.GetValue(); }
+- (void)setExperimentalSupportBufferIndirection:(BOOL)v { GetConfig().experimental_support_buffer_indirection = v; autoSave(); }
 
 - (int)experimentalAudioBufferBlocks       { return GetConfig().experimental_audio_buffer_blocks.GetValue(); }
 - (void)setExperimentalAudioBufferBlocks:(int)v { GetConfig().experimental_audio_buffer_blocks = v; autoSave(); }

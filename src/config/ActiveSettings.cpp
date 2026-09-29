@@ -248,6 +248,11 @@ bool ActiveSettings::ExperimentalBindingDirtyMasks()
 	return GetConfig().experimental_binding_dirty_masks;
 }
 
+bool ActiveSettings::ExperimentalSupportBufferIndirection()
+{
+	return GetConfig().experimental_support_buffer_indirection;
+}
+
 bool ActiveSettings::ExperimentalMetalFXEnable()
 {
 	return GetConfig().experimental_metalfx_enable;

@@ -429,7 +429,8 @@ namespace LatteDecompiler
 		src->add("struct StageResources {" _CRLF);
 		src->addFmt("uint dummy [[id({})]];" _CRLF, MetalArgumentBuffer::Dummy);
 
-		if (decompilerContext->output->resourceMappingMTL.uniformVarsBufferBindingPoint >= 0)
+		if (decompilerContext->output->resourceMappingMTL.uniformVarsBufferBindingPoint >= 0 &&
+			decompilerContext->output->resourceMappingMTL.supportBufferDirectBinding < 0)
 			src->addFmt("constant SupportBuffer* supportBuffer [[id({})]];" _CRLF, MetalArgumentBuffer::SupportBuffer);
 
 		if (decompilerContext->shader->uniformMode == LATTE_DECOMPILER_UNIFORM_MODE_FULL_CBANK)
@@ -499,7 +500,8 @@ namespace LatteDecompiler
 		}
 		src->add("};" _CRLF _CRLF);
 
-		if (decompilerContext->output->resourceMappingMTL.uniformVarsBufferBindingPoint >= 0)
+		if (decompilerContext->output->resourceMappingMTL.uniformVarsBufferBindingPoint >= 0 &&
+			decompilerContext->output->resourceMappingMTL.supportBufferDirectBinding < 0)
 			src->add("#define supportBuffer (*stageResources.supportBuffer)" _CRLF);
 		if (decompilerContext->shader->uniformMode == LATTE_DECOMPILER_UNIFORM_MODE_FULL_CBANK)
 		{
@@ -682,7 +684,15 @@ namespace LatteDecompiler
 
 		const bool usesArgumentBuffer = decompilerContext->output->resourceMappingMTL.argumentBufferBindingPoint >= 0;
 		if (usesArgumentBuffer)
+		{
 			src->addFmt(", constant StageResources& stageResources [[buffer({})]]", decompilerContext->output->resourceMappingMTL.argumentBufferBindingPoint);
+			// Experimental "Support Buffer Indirection": the support buffer was pulled out of StageResources
+			// (its id() member and #define are omitted above) and is bound directly at its own dedicated slot,
+			// so its per-draw change no longer re-encodes the whole argument buffer. The shader body references
+			// it as `supportBuffer.*` exactly as in the direct ABI, matching this parameter name.
+			if (decompilerContext->output->resourceMappingMTL.supportBufferDirectBinding >= 0)
+				src->addFmt(", constant SupportBuffer& supportBuffer [[buffer({})]]", decompilerContext->output->resourceMappingMTL.supportBufferDirectBinding);
+		}
 		else if (decompilerContext->output->resourceMappingMTL.uniformVarsBufferBindingPoint >= 0)
 		    src->addFmt(", constant SupportBuffer& supportBuffer [[buffer({})]]", decompilerContext->output->resourceMappingMTL.uniformVarsBufferBindingPoint);
 

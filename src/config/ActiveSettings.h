@@ -161,6 +161,11 @@ public:
 	// shaders only (no effect on argument-buffer shaders). Guarded by draw-pass generation + encoder epoch +
 	// shader pointer. OFF => loop always runs, byte-identical. See CemuConfig experimental_binding_dirty_masks.
 	[[nodiscard]] static bool ExperimentalBindingDirtyMasks();
+	// Metal: for a shader that stays on the argument buffer, bind ONLY its support buffer directly at a
+	// dedicated slot instead of inside the argument buffer, so its per-draw change no longer forces a
+	// whole-stage arg-buffer re-encode. Read at shader-decompile time (analyzer) and at bind time. OFF =>
+	// support buffer stays inside the argument buffer, byte-identical. See CemuConfig experimental_support_buffer_indirection.
+	[[nodiscard]] static bool ExperimentalSupportBufferIndirection();
 
 	// Experimental MetalFX spatial upscaling (Metal/iOS). Read once by MetalRenderer at construction
 	// and latched; see CemuConfig experimental_metalfx_* flags.

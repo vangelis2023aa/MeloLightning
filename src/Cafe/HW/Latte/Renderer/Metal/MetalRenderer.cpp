@@ -987,6 +987,7 @@ void MetalRenderer::AppendOverlayDebugInfo()
     ImGui::Text("Argument buffer encodes    %u (reuses: %u)", m_performanceMonitor.m_argumentBufferEncodes, m_performanceMonitor.m_argumentBufferReuses);
     ImGui::Text("Direct-binding draws       %u", m_performanceMonitor.m_directBindingDraws);
     ImGui::Text("Bind-loop skips            %u", m_performanceMonitor.m_bindLoopSkips);
+    ImGui::Text("Support-buffer indirection %u", m_performanceMonitor.m_supportIndirectionDraws);
 
     ImGui::Text("--- Pass fragmentation (per frame) ---");
     ImGui::Text("Draw calls                 %u", m_performanceMonitor.m_drawCalls);
@@ -3572,13 +3573,30 @@ bool MetalRenderer::BindStageResources(MTL::RenderCommandEncoder* renderCommandE
         
         size_t size = shader->uniform.uniformRangeSize;
         auto* allocation = m_memoryManager->GetCachedSnapshot(MetalMemoryManager::SupportSnapshotBase + mtlShaderType, supportBufferData, size);
-        if (argumentEncoder)
+        if (argumentEncoder && shader->resourceMapping.supportBufferDirectBinding < 0)
         {
             argumentBindings[MetalArgumentBuffer::SupportBuffer] = {MetalArgumentBinding::Type::Buffer, allocation->mtlBuffer, allocation->bufferOffset};
             DeclareResidency(renderCommandEncoder, allocation->mtlBuffer, MTL::ResourceUsageRead, renderStage);
         }
         else
-            SetBuffer(renderCommandEncoder, mtlShaderType, allocation->mtlBuffer, allocation->bufferOffset, shader->resourceMapping.uniformVarsBufferBindingPoint);
+        {
+            // Direct support-buffer binding. Two cases reach here:
+            //  - Direct ABI (no argument encoder): the support buffer is bound at uniformVarsBufferBindingPoint,
+            //    exactly as before.
+            //  - Experimental "Support Buffer Indirection" (argument encoder present + supportBufferDirectBinding
+            //    >= 0): the support buffer was pulled out of the argument buffer and is bound at its dedicated
+            //    direct slot so its per-draw change no longer forces a whole-stage arg-buffer re-encode.
+            // In both cases argumentBindings[SupportBuffer] is left Unused, so the reflected argument encoder
+            // (which omits the id(SupportBuffer) member in the indirection case) skips it and, critically, the
+            // arg-buffer cache key no longer rotates with the support snapshot -- the whole point of the toggle.
+            // A direct setBuffer makes the resource resident automatically, so no DeclareResidency is needed.
+            const sint32 supportSlot = (shader->resourceMapping.supportBufferDirectBinding >= 0)
+                ? shader->resourceMapping.supportBufferDirectBinding
+                : shader->resourceMapping.uniformVarsBufferBindingPoint;
+            SetBuffer(renderCommandEncoder, mtlShaderType, allocation->mtlBuffer, allocation->bufferOffset, supportSlot);
+            if (argumentEncoder)
+                m_performanceMonitor.m_supportIndirectionDraws++;
+        }
     }
     
     // Uniform buffers

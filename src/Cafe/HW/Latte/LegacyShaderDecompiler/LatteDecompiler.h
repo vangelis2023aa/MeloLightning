@@ -71,6 +71,14 @@ struct LatteDecompilerShaderResourceMapping
 	sint8 verticesPerInstanceBinding{-1};
 	sint8 indexBufferBinding{-1};
 	sint8 indexTypeBinding{-1};
+	// Metal exclusive, experimental "Support Buffer Indirection" (experimental_support_buffer_indirection):
+	// when >= 0, this shader stays in the argument-buffer ABI (argumentBufferBindingPoint >= 0) but its
+	// support buffer is bound DIRECTLY at this dedicated buffer slot instead of living inside the argument
+	// buffer. The support buffer's contents (baseVertex/baseInstance/ALU consts) change on essentially every
+	// draw, so as an argument-buffer member it forces a full whole-stage re-encode every draw; bound directly
+	// it no longer rotates the argument-buffer cache key. -1 = classic behavior (support buffer inside the
+	// argument buffer, or a direct-ABI shader that binds it via uniformVarsBufferBindingPoint).
+	sint8 supportBufferDirectBinding{-1};
 
 	sint32 getTextureCount()
 	{

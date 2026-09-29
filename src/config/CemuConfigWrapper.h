@@ -146,6 +146,7 @@ typedef NS_ENUM(NSInteger, ObjCPrecompiledShaderOption) {
 @property (nonatomic) BOOL experimentalArgBufferPartialEncode;
 @property (nonatomic) BOOL experimentalDirectVolatileBindings;
 @property (nonatomic) BOOL experimentalBindingDirtyMasks;
+@property (nonatomic) BOOL experimentalSupportBufferIndirection;
 @property (nonatomic) int experimentalAudioBufferBlocks;
 @property (nonatomic) int experimentalAudioAntiClip;
 

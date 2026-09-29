@@ -320,6 +320,15 @@ class ConfigManager: ObservableObject {
         }
     }
 
+    var experimentalSupportBufferIndirection: Binding<Bool> {
+        Binding {
+            self.config.experimentalSupportBufferIndirection
+        } set: {
+            self.config.experimentalSupportBufferIndirection = $0
+            self.objectWillChange.send()
+        }
+    }
+
     var experimentalAudioBufferBlocks: Binding<Int> {
         Binding {
             Int(self.config.experimentalAudioBufferBlocks)

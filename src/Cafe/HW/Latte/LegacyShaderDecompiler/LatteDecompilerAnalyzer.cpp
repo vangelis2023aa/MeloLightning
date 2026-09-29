@@ -1197,6 +1197,42 @@ void LatteDecompiler_analyze(LatteDecompilerShaderContext* shaderContext, LatteD
 			shaderContext->currentBufferBindingPointMTL <= 12;
 		if (!eligibleForDirect)
 			shaderContext->output->resourceMappingMTL.argumentBufferBindingPoint = MetalArgumentBuffer::BindingIndex;
+
+		// Experimental (default OFF): "Support Buffer Indirection". For a shader that stays on the argument
+		// buffer, pull ONLY its support buffer out of the argument buffer and bind it directly at a dedicated
+		// slot. The support buffer's contents (baseVertex/baseInstance/ALU consts, rewritten in
+		// BindStageResources every draw) change on essentially every draw, so as an argument-buffer member it
+		// rotates the content-addressed snapshot and forces a full whole-stage arg-buffer re-encode every draw
+		// -- the confirmed busy-scene storm (~1843 VS re-encodes/frame). Bound directly, the argument buffer's
+		// remaining members are stable across draws within a pass (textures/samplers are frozen; vertex-buffer
+		// bindings do not change because base-vertex/-instance are applied in-shader via the support buffer,
+		// not via binding offsets; uniform-buffer bindings change rarely), so the existing GetCachedArgumentBuffer
+		// cache hits and the re-encode is elided. The support buffer is instead updated with a single cheap
+		// direct SetBuffer, exactly like the direct ABI already does. Only the binding LOCATION moves; the
+		// support bytes are byte-identical. Unlike experimental_direct_volatile_bindings this helps EVERY
+		// arg-buffer shader (not just the direct-eligible subset), and composes with it (direct-eligible
+		// shaders take the direct ABI and never reach here). Strict subset + collision-free:
+		//  - arg-buffer ABI only (argumentBufferBindingPoint >= 0): a direct-ABI shader already binds its
+		//    support buffer directly, so there is nothing to move.
+		//  - uniformVarsBufferBindingPoint >= 0: only shaders that actually have a support buffer.
+		//  - !usesGeometryShader: geometry/mesh (object+mesh stage) pipelines bind through the most complex path
+		//    and are the ones the direct ABI also declines; the storm is confirmed plain-VS, so keep them on the
+		//    classic layout for this first cut rather than exercise a direct object/mesh support bind nothing else does.
+		//  - currentBufferBindingPointMTL < 12: in arg-buffer mode the direct low slots hold ONLY the argument
+		//    buffer itself (slot 0); vertex/uniform/texture/sampler bindings live INSIDE the argument buffer and
+		//    the helper buffers live at 28-30, so any low slot in [1,27] is free. The counter here is >= 4 for a
+		//    shader with a support buffer (uniformVars + the three index slots assigned just above), so the
+		//    dedicated slot never collides with slot 0; bounding at < 12 keeps it well clear of the helper range
+		//    and mirrors the direct-ABI eligibility, so a shader needing many low slots simply keeps the classic
+		//    all-in-argument-buffer layout (byte-identical).
+		if (ActiveSettings::ExperimentalSupportBufferIndirection() &&
+			shaderContext->output->resourceMappingMTL.argumentBufferBindingPoint >= 0 &&
+			shaderContext->output->resourceMappingMTL.uniformVarsBufferBindingPoint >= 0 &&
+			!shaderContext->options->usesGeometryShader &&
+			shaderContext->currentBufferBindingPointMTL < 12)
+		{
+			shaderContext->output->resourceMappingMTL.supportBufferDirectBinding = shaderContext->currentBufferBindingPointMTL++;
+		}
 	}
 #endif
 }
