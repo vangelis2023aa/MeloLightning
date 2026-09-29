@@ -37,6 +37,15 @@ public:
     uint32 m_drawPassBegins = 0; // CP continuous-draw-pass begins this frame (fragmentation numerator)
     uint32 m_snapshotMisses = 0; // snapshot cache misses (re-copies) this frame
 
+    // Developer-only ICB-batching PREMISE probe (see MetalRenderer::m_icbProbe* and AppendOverlayDebugInfo).
+    // Behavior-neutral: measures how batchable the draw stream is for a hypothetical "Metal ICB draw batching"
+    // experiment WITHOUT encoding anything. m_drawPipelineRepeats = draws whose pipeline matches the immediately
+    // preceding draw in the same continuous pass (the count that an inheritPipelineState ICB batch could fold);
+    // m_drawLongestPipelineRun = the longest such consecutive run this frame (the best-case single ICB batch
+    // size). If repeats stay near 0 / the longest run stays ~1 in real busy passes, ICB batching cannot pay off.
+    uint32 m_drawPipelineRepeats = 0;
+    uint32 m_drawLongestPipelineRun = 0;
+
     // Developer-only frame-budget diagnostics (see AppendOverlayDebugInfo). Behavior-neutral: read only.
     //
     // GPU execution time: measured from MTL::CommandBuffer::GPUStartTime()/GPUEndTime() read off each
@@ -79,6 +88,8 @@ public:
         m_drawCalls = 0;
         m_drawPassBegins = 0;
         m_snapshotMisses = 0;
+        m_drawPipelineRepeats = 0;
+        m_drawLongestPipelineRun = 0;
         // Snapshot the GPU-active accumulator into the displayed value, then reset the accumulator for the
         // next frame. m_presentTimeNs is deliberately left untouched (it is set directly in SwapBuffers).
         m_gpuActiveUs = m_gpuActiveAccumUs;

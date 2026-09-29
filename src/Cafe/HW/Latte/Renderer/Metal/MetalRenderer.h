@@ -651,6 +651,22 @@ private:
 	// Bumped at the start of every draw sequence; see GetDrawPassGeneration(). GPU-thread only.
 	uint32 m_drawPassGeneration = 1;
 
+	// Diagnostic-only probe for the "Metal ICB draw batching" experiment (experimental_metal_icb_draw_batching).
+	// Behavior-neutral: NOT a toggle and it changes nothing that is submitted - it only measures the PREMISE of
+	// ICB draw batching, namely how long the runs of CONSECUTIVE draws that share one pipeline (within a single
+	// continuous draw pass) actually are. A same-frame CPU-encoded MTLIndirectCommandBuffer removes only the
+	// per-draw drawIndexedPrimitives emit (cpuTime_dcDrawEmit, NOT the bottleneck) while adding ICB-command
+	// encode overhead + mandatory manual useResource residency + supportIndirectCommandBuffers pipeline rebuilds,
+	// so it can only pay off if it can ELIDE the per-draw pipeline/state/bind work across a run - which needs a
+	// batchable run of same-pipeline draws AND (to reuse the ICB) the register->state generation tracking that
+	// does not exist here. This probe answers the first, cheap, decidable half: if the longest same-pipeline run
+	// is short in real game passes, ICB batching cannot help regardless of the missing dirty tracking. Tracked
+	// every draw (a single pointer+uint compare, like m_drawCalls); the counts display only in the debug overlay.
+	// GPU-thread only. m_icbProbePrevPipeline == nullptr means "no previous draw in this run yet".
+	const void* m_icbProbePrevPipeline = nullptr;
+	uint32 m_icbProbePrevGeneration = 0; // m_drawPassGeneration of the previous draw (run breaks when it differs)
+	uint32 m_icbProbeRunLen = 0;         // length of the current consecutive same-pipeline run
+
 	// Experimental "Skip Repeated Texture Binds" (experimental_binding_dirty_masks). Monotonic epoch bumped
 	// inside ResetEncoderState() (i.e. on EVERY new render/compute/blit encoder), so it changes whenever the
 	// live render encoder is (re)created - including a mid-pass command-buffer commit that recreates the

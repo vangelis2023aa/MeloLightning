@@ -997,6 +997,12 @@ void MetalRenderer::AppendOverlayDebugInfo()
         ImGui::Text("Draws per pass             %.2f", drawsPerPass);
     }
     ImGui::Text("Snapshot misses            %u", m_performanceMonitor.m_snapshotMisses);
+    {
+        // ICB-batching premise: of m_drawCalls draws, how many continued a same-pipeline run in the same pass
+        // (ICB-batchable candidates) and how long the single longest run was (best-case ICB batch size). Near-0
+        // repeats / longest-run ~1 means "consecutive compatible draws" do not exist to batch -> ICB is moot.
+        ImGui::Text("Same-pipeline draw repeats %u (longest run: %u)", m_performanceMonitor.m_drawPipelineRepeats, m_performanceMonitor.m_drawLongestPipelineRun);
+    }
 
     ImGui::Text("--- Frame budget (per frame, prev) ---");
     {
@@ -1992,6 +1998,26 @@ void MetalRenderer::draw_execute(uint32 baseVertex, uint32 baseInstance, uint32 
     }
     if (!pipelineObj->m_pipeline)
         return;
+
+    // Diagnostic-only ICB-batching premise probe (see m_icbProbePrevPipeline). Behavior-neutral: this only
+    // counts how long the runs of consecutive same-pipeline draws are within one continuous pass; it submits
+    // nothing. A run continues when this draw's pipeline equals the previous draw's AND they are in the same
+    // draw-pass generation (a pass boundary, shader/bind/context change all bump m_drawPassGeneration and so
+    // legitimately end a batchable run). This is the empirical test of whether "consecutive compatible draws"
+    // exist to batch at all - if the longest run stays ~1 in busy passes, ICB draw batching cannot pay off.
+    if (m_icbProbePrevPipeline == pipelineObj->m_pipeline && m_icbProbePrevGeneration == m_drawPassGeneration)
+    {
+        m_performanceMonitor.m_drawPipelineRepeats++;
+        m_icbProbeRunLen++;
+    }
+    else
+    {
+        m_icbProbeRunLen = 1;
+    }
+    if (m_icbProbeRunLen > m_performanceMonitor.m_drawLongestPipelineRun)
+        m_performanceMonitor.m_drawLongestPipelineRun = m_icbProbeRunLen;
+    m_icbProbePrevPipeline = pipelineObj->m_pipeline;
+    m_icbProbePrevGeneration = m_drawPassGeneration;
 
     if (pipelineObj->m_pipeline != encoderState.m_renderPipelineState)
        {
