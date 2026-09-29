@@ -243,6 +243,11 @@ bool ActiveSettings::ExperimentalDirectVolatileBindings()
 	return GetConfig().experimental_direct_volatile_bindings;
 }
 
+bool ActiveSettings::ExperimentalBindingDirtyMasks()
+{
+	return GetConfig().experimental_binding_dirty_masks;
+}
+
 bool ActiveSettings::ExperimentalMetalFXEnable()
 {
 	return GetConfig().experimental_metalfx_enable;

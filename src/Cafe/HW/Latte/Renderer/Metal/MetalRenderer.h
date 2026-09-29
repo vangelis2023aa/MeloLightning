@@ -355,6 +355,11 @@ public:
     {
         m_state.m_encoderState = {};
 
+        // A fresh Metal encoder inherits NO binding state, so any per-pass "these bindings are still live"
+        // fast-path must be invalidated here. Bumping the epoch on every encoder reset makes the
+        // experimental_binding_dirty_masks skip-key stop matching until the loop re-runs on the new encoder.
+        m_encoderEpoch++;
+
         // TODO: set viewport and scissor to render target dimensions if render commands
 
         for (uint32 i = 0; i < METAL_SHADER_TYPE_TOTAL; i++)
@@ -645,6 +650,20 @@ private:
 
 	// Bumped at the start of every draw sequence; see GetDrawPassGeneration(). GPU-thread only.
 	uint32 m_drawPassGeneration = 1;
+
+	// Experimental "Skip Repeated Texture Binds" (experimental_binding_dirty_masks). Monotonic epoch bumped
+	// inside ResetEncoderState() (i.e. on EVERY new render/compute/blit encoder), so it changes whenever the
+	// live render encoder is (re)created - including a mid-pass command-buffer commit that recreates the
+	// encoder WITHOUT bumping m_drawPassGeneration. The per-stage skip below is keyed on both, plus the shader
+	// pointer, so it can never skip a texture/sampler re-bind onto a fresh (blank) encoder or across a shader
+	// change. GPU-thread only; only read when the toggle is ON.
+	uint64 m_encoderEpoch = 0;
+	// Per-Metal-stage record of the (generation, epoch, shader) at which this stage's DIRECT-ABI texture+sampler
+	// bind loop last fully ran. When the toggle is ON and all three still match, BindStageResources skips that
+	// loop (the binds are frozen within a pass and still live on the same encoder). shader==nullptr => never bound.
+	uint32 m_bindLoopGeneration[METAL_SHADER_TYPE_TOTAL] = {};
+	uint64 m_bindLoopEpoch[METAL_SHADER_TYPE_TOTAL] = {};
+	const void* m_bindLoopShader[METAL_SHADER_TYPE_TOTAL] = {};
 
 	// Experimental "Partial Rendering" (experimental_partial_rendering): a guest render-target clear is
 	// recorded here instead of being emitted as its own render pass, then folded into the next draw pass

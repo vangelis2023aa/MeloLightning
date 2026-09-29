@@ -19,6 +19,12 @@ public:
     // this stays 0 (every game shader keeps its argument buffer); when ON it rises as the arg-buffer
     // encodes/reuses above fall, which is the direct evidence the storm was moved off the arg-buffer path.
     uint32 m_directBindingDraws = 0;
+    // Experimental "Skip Repeated Texture Binds" proof counter (experimental_binding_dirty_masks): number of
+    // BindStageResources calls this frame that skipped the frozen texture+sampler bind loop for a DIRECT-ABI
+    // stage because its (generation, encoder-epoch, shader) key still matched. 0 when the toggle is OFF (or when
+    // Direct Shader Bindings is OFF, since only direct-ABI stages are eligible). As it rises it should track the
+    // number of draws-after-the-first within passes; it is the direct evidence the per-draw bind scan was elided.
+    uint32 m_bindLoopSkips = 0;
     // Developer-only fragmentation counters (see AppendOverlayDebugInfo). Observation only.
     uint32 m_drawCalls = 0;      // guest draws submitted to draw_execute this frame
     uint32 m_drawPassBegins = 0; // CP continuous-draw-pass begins this frame (fragmentation numerator)
@@ -61,6 +67,7 @@ public:
         m_argumentBufferEncodes = 0;
         m_argumentBufferReuses = 0;
         m_directBindingDraws = 0;
+        m_bindLoopSkips = 0;
         m_drawCalls = 0;
         m_drawPassBegins = 0;
         m_snapshotMisses = 0;

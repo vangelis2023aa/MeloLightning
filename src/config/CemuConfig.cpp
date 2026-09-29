@@ -314,6 +314,7 @@ XMLConfigParser CemuConfig::Load(XMLConfigParser& parser)
 	experimental_argbuffer_incremental_refcount = experimental.get("ArgBufferIncrementalRefcount", false);
 	experimental_argbuffer_partial_encode = experimental.get("ArgBufferPartialEncode", false);
 	experimental_direct_volatile_bindings = experimental.get("DirectVolatileBindings", false);
+	experimental_binding_dirty_masks = experimental.get("BindingDirtyMasks", false);
 	experimental_audio_buffer_blocks = experimental.get("AudioBufferBlocks", 0);
 	experimental_audio_anti_clip = experimental.get("AudioAntiClip", 0);
 	experimental_skylander_save_interval_ms = experimental.get("SkylanderSaveIntervalMs", 0);
@@ -524,6 +525,7 @@ XMLConfigParser CemuConfig::Save(XMLConfigParser& parser)
 	experimental.set("ArgBufferIncrementalRefcount", experimental_argbuffer_incremental_refcount.GetValue());
 	experimental.set("ArgBufferPartialEncode", experimental_argbuffer_partial_encode.GetValue());
 	experimental.set("DirectVolatileBindings", experimental_direct_volatile_bindings.GetValue());
+	experimental.set("BindingDirtyMasks", experimental_binding_dirty_masks.GetValue());
 	experimental.set("AudioBufferBlocks", experimental_audio_buffer_blocks.GetValue());
 	experimental.set("AudioAntiClip", experimental_audio_anti_clip.GetValue());
 	experimental.set("SkylanderSaveIntervalMs", experimental_skylander_save_interval_ms.GetValue());

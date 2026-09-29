@@ -986,6 +986,7 @@ void MetalRenderer::AppendOverlayDebugInfo()
     ImGui::Text("Snapshot uploads           %llu KB (reuses: %u)", static_cast<unsigned long long>(m_performanceMonitor.m_snapshotBytes / 1024), m_performanceMonitor.m_snapshotReuses);
     ImGui::Text("Argument buffer encodes    %u (reuses: %u)", m_performanceMonitor.m_argumentBufferEncodes, m_performanceMonitor.m_argumentBufferReuses);
     ImGui::Text("Direct-binding draws       %u", m_performanceMonitor.m_directBindingDraws);
+    ImGui::Text("Bind-loop skips            %u", m_performanceMonitor.m_bindLoopSkips);
 
     ImGui::Text("--- Pass fragmentation (per frame) ---");
     ImGui::Text("Draw calls                 %u", m_performanceMonitor.m_drawCalls);
@@ -2714,6 +2715,11 @@ MTL::RenderCommandEncoder* MetalRenderer::GetTemporaryRenderCommandEncoder(MTL::
     m_commandEncoder = renderCommandEncoder;
     m_encoderType = MetalEncoderType::Render;
 
+    // A temporary render encoder replaces the live encoder without going through ResetEncoderState, so bump the
+    // epoch here too (experimental_binding_dirty_masks): a later draw must never skip its texture/sampler binds
+    // believing they are still live on the previous encoder. Monotonic; only read when that toggle is ON.
+    m_encoderEpoch++;
+
     // Debug
     m_performanceMonitor.m_renderPasses++;
 
@@ -3310,6 +3316,28 @@ bool MetalRenderer::BindStageResources(MTL::RenderCommandEncoder* renderCommandE
     // See MetalTextureBindCache::GetPassTexture for the correctness proof.
     const bool textureFastPathOn = ActiveSettings::ExperimentalPassTextureFastPath();
 
+    // Experimental "Skip Repeated Texture Binds" (experimental_binding_dirty_masks): a shader's textures and
+    // samplers are frozen for the whole draw pass, and in the DIRECT binding ABI (no argument buffer) the loop
+    // below only writes them straight to the render encoder. So for draws after the first in a pass we can skip
+    // the entire resolve+bind loop, provided the same encoder is still live. The three-part key defeats both
+    // hazards: m_drawPassGeneration (a bind/context/sampler/shader change ends the pass and bumps it) proves the
+    // bindings are still valid, m_encoderEpoch (bumped on every ResetEncoderState) proves the encoder was not
+    // recreated mid-pass by a command-buffer commit (which would wipe the binds), and the shader pointer proves
+    // the same shader owns this stage. This is inert for argument-buffer shaders: their texture/sampler entries
+    // must be re-written into argumentBindings for the whole-buffer encode every draw, so the loop must run.
+    // OFF (or Direct Shader Bindings OFF) => bindLoopSkipEligible is false => the loop always runs (byte-identical).
+    const bool bindLoopSkipEligible = !argumentEncoder && ActiveSettings::ExperimentalBindingDirtyMasks();
+    bool runBindLoop = true;
+    if (bindLoopSkipEligible &&
+        m_bindLoopShader[mtlShaderType] == static_cast<const void*>(shader) &&
+        m_bindLoopGeneration[mtlShaderType] == m_drawPassGeneration &&
+        m_bindLoopEpoch[mtlShaderType] == m_encoderEpoch)
+    {
+        runBindLoop = false;
+        m_performanceMonitor.m_bindLoopSkips++;
+    }
+    if (runBindLoop)
+    {
     for (sint32 relative_textureUnit = 0; relative_textureUnit < LATTE_NUM_MAX_TEX_UNITS; relative_textureUnit++)
     {
         if (shader->resourceMapping.textureUnitToBindingPoint[relative_textureUnit] < 0)
@@ -3440,7 +3468,16 @@ bool MetalRenderer::BindStageResources(MTL::RenderCommandEncoder* renderCommandE
         else
             SetTexture(renderCommandEncoder, mtlShaderType, mtlTexture, binding);
     }
-    
+    if (bindLoopSkipEligible)
+    {
+        // Record that this stage's DIRECT texture+sampler binds are now live on the current encoder for this
+        // pass, so subsequent draws in the pass (same generation + epoch + shader) can skip the loop above.
+        m_bindLoopShader[mtlShaderType] = static_cast<const void*>(shader);
+        m_bindLoopGeneration[mtlShaderType] = m_drawPassGeneration;
+        m_bindLoopEpoch[mtlShaderType] = m_encoderEpoch;
+    }
+    } // end if (runBindLoop)
+
     // Support buffer
     auto GET_UNIFORM_DATA_PTR = [&](size_t index) { return supportBufferData + (index / 4); };
     

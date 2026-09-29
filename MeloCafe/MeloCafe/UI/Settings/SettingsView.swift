@@ -371,6 +371,13 @@ struct SettingsView: View {
                         }
 
                         VStack(alignment: .leading, spacing: 4) {
+                            Toggle("Skip Repeated Texture Binds", isOn: configManager.experimentalBindingDirtyMasks)
+                            Text("Metal only. Experimental. Works only together with \u{201C}Direct Shader Bindings\u{201D} above. A shader's textures and samplers cannot change within a run of draws, so this skips re-sending them on every draw after the first and only re-sends them when the run ends, the shader changes, or the renderer starts a new command encoder. Removes a little per-draw CPU work in busy scenes; the effect is small on its own. Turn it off if you ever see wrong or missing textures.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        VStack(alignment: .leading, spacing: 4) {
                             Toggle("Extended Command Batching", isOn: configManager.experimentalExtendedCommitThreshold)
                             Text("Metal only. Submit larger batches of GPU work per command buffer, reducing how often work is flushed to the GPU. Rendering is unchanged, but larger batches raise GPU latency and memory use, which can shift frame pacing or, in extreme scenes, trigger a GPU timeout.")
                                 .font(.caption)

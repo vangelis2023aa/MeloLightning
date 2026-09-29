@@ -157,6 +157,10 @@ public:
 	// time (analyzer) and at Metal argument-encoder creation time. OFF => every shader keeps its argument
 	// buffer, byte-identical to prior behavior. See CemuConfig experimental_direct_volatile_bindings.
 	[[nodiscard]] static bool ExperimentalDirectVolatileBindings();
+	// Metal: skip the frozen texture+sampler bind loop for draws after the first in a pass, for DIRECT-ABI
+	// shaders only (no effect on argument-buffer shaders). Guarded by draw-pass generation + encoder epoch +
+	// shader pointer. OFF => loop always runs, byte-identical. See CemuConfig experimental_binding_dirty_masks.
+	[[nodiscard]] static bool ExperimentalBindingDirtyMasks();
 
 	// Experimental MetalFX spatial upscaling (Metal/iOS). Read once by MetalRenderer at construction
 	// and latched; see CemuConfig experimental_metalfx_* flags.

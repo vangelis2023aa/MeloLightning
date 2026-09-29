@@ -311,6 +311,15 @@ class ConfigManager: ObservableObject {
         }
     }
 
+    var experimentalBindingDirtyMasks: Binding<Bool> {
+        Binding {
+            self.config.experimentalBindingDirtyMasks
+        } set: {
+            self.config.experimentalBindingDirtyMasks = $0
+            self.objectWillChange.send()
+        }
+    }
+
     var experimentalAudioBufferBlocks: Binding<Int> {
         Binding {
             Int(self.config.experimentalAudioBufferBlocks)
