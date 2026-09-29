@@ -24,6 +24,7 @@
 #include "Cafe/HW/Latte/Core/FetchShader.h"
 #include "Cafe/HW/Latte/Core/LatteConst.h"
 #include "Cafe/HW/Latte/Core/LattePerformanceMonitor.h"
+#include "Cafe/OS/libs/gx2/GX2GuestFrameTiming.h" // TEMP diagnostic instrumentation (behavior-neutral)
 #include "util/highresolutiontimer/HighResolutionTimer.h"
 #include "config/CemuConfig.h"
 #include "config/ActiveSettings.h"
@@ -1063,6 +1064,39 @@ void MetalRenderer::AppendOverlayDebugInfo()
         ImGui::Text("    - support/uniform/tex    %.2f ms", bindRemainderMs);
         ImGui::Text("  draw emit                  %.2f ms", drawEmitMs);
         ImGui::Text("  accounted sum              %.2f ms", dcAccountedMs);
+    }
+
+    ImGui::Text("--- Guest frame (producer, prev, TEMP diag) ---");
+    {
+        // TEMPORARY behavior-neutral instrumentation. The guest producer's per-frame wall clock,
+        // delimited by successive GX2SwapScanBuffers on the GX2 main submit core, split into the
+        // blocking categories timed at their funnels (GX2WaitTimeStamp / GX2WaitForFlip /
+        // GX2WaitForVsync). Same raw-TSC clock as the Latte timers above, so directly comparable.
+        // "active/unaccounted" is the derived remainder = span - the three measured waits; in this
+        // first build it STILL contains any guest-internal (queueAndWait) blocking that is not yet
+        // instrumented, so it is NOT purely active guest execution. 1-frame skew vs the CURRENT
+        // counts, same as the block above.
+        GX2::GuestFrameTimingState& gft = GX2::GetGuestFrameTiming();
+        if (gft.prevValid.load(std::memory_order_relaxed) == 0)
+        {
+            ImGui::Text("Guest frame data             (waiting for main-core swap)");
+        }
+        else
+        {
+            const double gSpanMs   = PPCTimer_tscToMicroseconds(gft.prevFrameSpanTsc.load(std::memory_order_relaxed)) / 1000.0;
+            const double gRetireMs = PPCTimer_tscToMicroseconds(gft.prevGpuRetireWaitTsc.load(std::memory_order_relaxed)) / 1000.0;
+            const double gFlipMs   = PPCTimer_tscToMicroseconds(gft.prevFlipWaitTsc.load(std::memory_order_relaxed)) / 1000.0;
+            const double gVsyncMs  = PPCTimer_tscToMicroseconds(gft.prevVsyncWaitTsc.load(std::memory_order_relaxed)) / 1000.0;
+            const double gWaitSum  = gRetireMs + gFlipMs + gVsyncMs;
+            double gActiveMs = gSpanMs - gWaitSum; // derived: active guest exec + any uninstrumented guest-internal wait
+            if (gActiveMs < 0.0) gActiveMs = 0.0;
+            ImGui::Text("Guest frame span             %.2f ms", gSpanMs);
+            ImGui::Text("GPU-retire wait (WaitTS)     %.2f ms", gRetireMs);
+            ImGui::Text("Flip wait (GX2WaitForFlip)   %.2f ms", gFlipMs);
+            ImGui::Text("Vsync wait (GX2WaitForVsync) %.2f ms", gVsyncMs);
+            ImGui::Text("Guest wait sum               %.2f ms", gWaitSum);
+            ImGui::Text("Guest active/unaccounted     %.2f ms (derived)", gActiveMs);
+        }
     }
 
     ImGui::Text("--- Cache debug info ---");

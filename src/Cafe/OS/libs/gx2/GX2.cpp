@@ -20,6 +20,7 @@
 #include "GX2_Surface.h"
 #include "GX2_Surface_Copy.h"
 #include "GX2_Texture.h"
+#include "GX2GuestFrameTiming.h" // TEMP diagnostic instrumentation (behavior-neutral)
 
 #include <cinttypes>
 
@@ -49,6 +50,12 @@ uint64 lastSwapTime = 0;
 void gx2Export_GX2SwapScanBuffers(PPCInterpreter_t* hCPU)
 {
 	cemuLog_log(LogType::GX2, "GX2SwapScanBuffers()");
+
+	// TEMP diagnostic (behavior-neutral): a guest frame is [this swap, next swap] on the main submit
+	// core. Publish the just-finished frame's span + per-category guest wait sums and re-arm the clock.
+	// Gated to the main core so the span matches the accumulators that are added only on that core.
+	if (GX2::sGX2MainCoreIndex == coreinit::OSGetCoreId())
+		GX2::PublishGuestFrameAtMainCoreSwap();
 
 	bool isPokken = false;
 

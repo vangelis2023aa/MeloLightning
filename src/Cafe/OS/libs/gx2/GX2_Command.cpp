@@ -11,6 +11,7 @@
 #include "GX2_Shader.h"
 #include "GX2_Misc.h"
 #include "OS/libs/coreinit/coreinit_MEM.h"
+#include "Cafe/OS/libs/gx2/GX2GuestFrameTiming.h" // TEMP diagnostic instrumentation (behavior-neutral)
 
 namespace GX2
 {
@@ -318,7 +319,9 @@ namespace GX2
 	bool GX2WaitTimeStamp(uint64 tsWait)
 	{
 		// handle GPU timeout here? But for now we timeout after 60 seconds
+		const uint64 _diagT0 = PPCTimer_getRawTsc(); // TEMP diagnostic: GPU-retire blocking funnel
 		TCL::TCLWaitTimestamp(TCL::TCLTimestampId::TIMESTAMP_LAST_BUFFER_RETIRED, tsWait, Espresso::TIMER_CLOCK * 60);
+		AddGuestWaitTsc(GuestWaitCategory::GpuRetire, _diagT0); // TEMP diagnostic (main-core gated no-op elsewhere)
 		return true;
 	}
 

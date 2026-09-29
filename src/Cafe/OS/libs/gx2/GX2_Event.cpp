@@ -9,6 +9,7 @@
 #include "Cafe/HW/Latte/Renderer/Renderer.h"
 #include "config/ActiveSettings.h"
 #include "util/helpers/ConcurrentQueue.h"
+#include "Cafe/OS/libs/gx2/GX2GuestFrameTiming.h" // TEMP diagnostic instrumentation (behavior-neutral)
 
 namespace GX2
 {
@@ -200,18 +201,22 @@ namespace GX2
 
 	void GX2WaitForVsync()
 	{
+		const uint64 _diagT0 = PPCTimer_getRawTsc(); // TEMP diagnostic: vsync blocking
 		__OSLockScheduler();
 		g_vsyncThreadQueue.GetPtr()->queueAndWait(coreinit::OSGetCurrentThread());
 		__OSUnlockScheduler();
+		AddGuestWaitTsc(GuestWaitCategory::Vsync, _diagT0); // TEMP diagnostic (main-core gated no-op elsewhere)
 	}
 
 	void GX2WaitForFlip()
 	{
 		if ((sint32)(_swapEndianU32(LatteGPUState.sharedArea->flipRequestCountBE) == _swapEndianU32(LatteGPUState.sharedArea->flipExecuteCountBE)))
 			return; // dont wait if no flip is requested
+		const uint64 _diagT0 = PPCTimer_getRawTsc(); // TEMP diagnostic: flip blocking (real waits only, after early return)
 		__OSLockScheduler();
 		g_flipThreadQueue.GetPtr()->queueAndWait(coreinit::OSGetCurrentThread());
 		__OSUnlockScheduler();
+		AddGuestWaitTsc(GuestWaitCategory::Flip, _diagT0); // TEMP diagnostic (main-core gated no-op elsewhere)
 	}
 
 	bool GX2DrawDone()
