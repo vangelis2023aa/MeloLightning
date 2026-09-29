@@ -3,7 +3,7 @@
 #include "Cafe/HW/Latte/Renderer/Metal/MetalCommon.h"
 
 //#include "Cemu/FileCache/FileCache.h"
-//#include "config/ActiveSettings.h"
+#include "config/ActiveSettings.h"
 #include "Cemu/Logging/CemuLogging.h"
 #include "Common/precompiled.h"
 #include "GameProfile/GameProfile.h"
@@ -360,13 +360,29 @@ void RendererShaderMtl::CompileInternal()
 
 	if (m_function && m_isGameShader)
 	{
-		m_argumentEncoder = m_function->newArgumentEncoder(MetalArgumentBuffer::BindingIndex);
-		if (!m_argumentEncoder)
+		// Experimental direct-volatile-bindings (default OFF): a shader emitted in the DIRECT binding ABI
+		// has no argument buffer, so newArgumentEncoder(BindingIndex=0) would return nil (slot 0 is the
+		// support buffer, not an arg buffer) and then wrongly destroy m_function on the nil check below.
+		// When the toggle is OFF this short-circuits WITHOUT touching m_mslCode, so behavior is byte-
+		// identical to before. When ON, detect the ABI from the emitted MSL: the lowercase token
+		// "stageResources" (the argument-buffer parameter name plus its #define expansions) is emitted
+		// ONLY in arg-buffer mode -- LatteDecompilerEmitMSLHeader.hpp early-returns for a direct shader, so
+		// neither the struct-typed parameter nor any stageResources.* reference exists in direct MSL. Its
+		// presence is therefore an exact arg-buffer marker. A direct shader legitimately has no encoder; a
+		// still-nil encoder for an arg-buffer shader stays fatal exactly as before.
+		const bool usesArgumentBuffer =
+			!ActiveSettings::ExperimentalDirectVolatileBindings() ||
+			(m_mslCode.find("stageResources") != std::string::npos);
+		if (usesArgumentBuffer)
 		{
-			cemuLog_log(LogType::Force, "failed to create Metal argument encoder for shader {:016x}", m_baseHash);
-			m_function->release();
-			m_function = nullptr;
-			return;
+			m_argumentEncoder = m_function->newArgumentEncoder(MetalArgumentBuffer::BindingIndex);
+			if (!m_argumentEncoder)
+			{
+				cemuLog_log(LogType::Force, "failed to create Metal argument encoder for shader {:016x}", m_baseHash);
+				m_function->release();
+				m_function = nullptr;
+				return;
+			}
 		}
 	}
 

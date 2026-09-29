@@ -238,6 +238,11 @@ bool ActiveSettings::ExperimentalArgBufferPartialEncode()
 	return GetConfig().experimental_argbuffer_partial_encode;
 }
 
+bool ActiveSettings::ExperimentalDirectVolatileBindings()
+{
+	return GetConfig().experimental_direct_volatile_bindings;
+}
+
 bool ActiveSettings::ExperimentalMetalFXEnable()
 {
 	return GetConfig().experimental_metalfx_enable;

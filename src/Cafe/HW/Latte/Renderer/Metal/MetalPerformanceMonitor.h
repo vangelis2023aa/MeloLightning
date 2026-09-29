@@ -14,6 +14,11 @@ public:
     uint32 m_snapshotReuses = 0;
     uint32 m_argumentBufferEncodes = 0;
     uint32 m_argumentBufferReuses = 0;
+    // Experimental "Direct Shader Bindings" proof counter: number of BindStageResources calls this frame
+    // that took the direct (no argument-buffer) path for an eligible game shader. When the toggle is OFF
+    // this stays 0 (every game shader keeps its argument buffer); when ON it rises as the arg-buffer
+    // encodes/reuses above fall, which is the direct evidence the storm was moved off the arg-buffer path.
+    uint32 m_directBindingDraws = 0;
     // Developer-only fragmentation counters (see AppendOverlayDebugInfo). Observation only.
     uint32 m_drawCalls = 0;      // guest draws submitted to draw_execute this frame
     uint32 m_drawPassBegins = 0; // CP continuous-draw-pass begins this frame (fragmentation numerator)
@@ -55,6 +60,7 @@ public:
         m_snapshotReuses = 0;
         m_argumentBufferEncodes = 0;
         m_argumentBufferReuses = 0;
+        m_directBindingDraws = 0;
         m_drawCalls = 0;
         m_drawPassBegins = 0;
         m_snapshotMisses = 0;

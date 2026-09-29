@@ -152,6 +152,11 @@ public:
 	[[nodiscard]] static bool ExperimentalAdaptiveRenderWork();
 	[[nodiscard]] static bool ExperimentalArgBufferIncrementalRefcount();
 	[[nodiscard]] static bool ExperimentalArgBufferPartialEncode();
+	// Metal: emit eligible game shaders in the direct binding ABI (no per-shader argument buffer) to
+	// eliminate the busy-scene argument-buffer re-encode storm at its source. Read at shader-decompile
+	// time (analyzer) and at Metal argument-encoder creation time. OFF => every shader keeps its argument
+	// buffer, byte-identical to prior behavior. See CemuConfig experimental_direct_volatile_bindings.
+	[[nodiscard]] static bool ExperimentalDirectVolatileBindings();
 
 	// Experimental MetalFX spatial upscaling (Metal/iOS). Read once by MetalRenderer at construction
 	// and latched; see CemuConfig experimental_metalfx_* flags.

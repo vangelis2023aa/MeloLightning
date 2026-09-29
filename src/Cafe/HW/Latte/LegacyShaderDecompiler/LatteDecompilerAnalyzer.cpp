@@ -8,6 +8,7 @@
 #include "Cafe/HW/Latte/Core/FetchShader.h"
 #include "Cafe/HW/Latte/Core/LatteShader.h"
 #include "Cafe/HW/Latte/Renderer/Renderer.h"
+#include "config/ActiveSettings.h"
 #include "Common/MemPtr.h"
 #include "HW/Latte/ISA/LatteReg.h"
 #ifdef ENABLE_METAL
@@ -1171,6 +1172,31 @@ void LatteDecompiler_analyze(LatteDecompilerShaderContext* shaderContext, LatteD
 	shaderContext->output->resourceMappingMTL.indexTypeBinding = shaderContext->currentBufferBindingPointMTL++;
 #ifdef ENABLE_METAL
 	if (g_renderer && g_renderer->GetType() == RendererAPI::Metal)
-		shaderContext->output->resourceMappingMTL.argumentBufferBindingPoint = MetalArgumentBuffer::BindingIndex;
+	{
+		// Experimental (default OFF): emit eligible shaders in the DIRECT binding ABI instead of behind a
+		// per-shader argument buffer, to remove the busy-scene arg-buffer re-encode storm at its source.
+		// Leaving argumentBufferBindingPoint at its default (-1) selects the pre-existing direct path in the
+		// MSL emitter, the renderer's BindStageResources, and draw_execute (the same path Vulkan/GL use).
+		// Eligibility is a STRICT SUBSET; anything not provably safe stays on the argument buffer, so the
+		// OFF path and every ineligible shader are byte-identical to before:
+		//  - !useSSBOForStreamout: the SSBO-streamout manual-fetch path (LatteDecompilerEmitMSL.cpp) emits
+		//    only the arg-buffer 'stageResources.indexBuffer' fetchVertex variant, so those shaders must
+		//    stay on the argument buffer or they would not compile in direct mode.
+		//  - !usesGeometryShader: geometry/mesh (object+mesh stage) pipelines are the most complex binding
+		//    path; keep them on the argument buffer for this first cut (still covers the plain-VS storm,
+		//    which is the confirmed dominant cost).
+		//  - currentBufferBindingPointMTL <= 12: the direct low buffer slots (support buffer, uniform
+		//    buffers, verticesPerInstance/indexBuffer/indexType assigned just above) must not overlap the
+		//    manual-fetch vertex-buffer range, which begins at GET_MTL_VERTEX_BUFFER_INDEX(15) = 12. A
+		//    shader needing more low slots than that stays on the argument buffer rather than risk a
+		//    slot collision.
+		const bool eligibleForDirect =
+			ActiveSettings::ExperimentalDirectVolatileBindings() &&
+			!shaderContext->analyzer.useSSBOForStreamout &&
+			!shaderContext->options->usesGeometryShader &&
+			shaderContext->currentBufferBindingPointMTL <= 12;
+		if (!eligibleForDirect)
+			shaderContext->output->resourceMappingMTL.argumentBufferBindingPoint = MetalArgumentBuffer::BindingIndex;
+	}
 #endif
 }

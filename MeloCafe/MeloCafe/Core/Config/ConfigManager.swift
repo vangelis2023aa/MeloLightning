@@ -302,6 +302,15 @@ class ConfigManager: ObservableObject {
         }
     }
 
+    var experimentalDirectVolatileBindings: Binding<Bool> {
+        Binding {
+            self.config.experimentalDirectVolatileBindings
+        } set: {
+            self.config.experimentalDirectVolatileBindings = $0
+            self.objectWillChange.send()
+        }
+    }
+
     var experimentalAudioBufferBlocks: Binding<Int> {
         Binding {
             Int(self.config.experimentalAudioBufferBlocks)

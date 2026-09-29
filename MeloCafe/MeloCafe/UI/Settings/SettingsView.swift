@@ -364,6 +364,13 @@ struct SettingsView: View {
                         }
 
                         VStack(alignment: .leading, spacing: 4) {
+                            Toggle("Direct Shader Bindings (No Argument Buffer)", isOn: configManager.experimentalDirectVolatileBindings)
+                            Text("Metal only. Experimental. Attacks the same busy-scene slowdown as the two options above, but at the source: instead of making the per-draw argument-buffer rebuild cheaper, it stops eligible shaders from using an argument buffer at all, binding their resources straight to the GPU command encoder. Because those bindings do not change within a run of draws, the renderer skips re-sending them entirely and the per-draw rebuild disappears for those shaders. Shaders that are not eligible (advanced geometry/transform-feedback paths) automatically keep the old behavior, and turning this off restores the previous behavior exactly. This exercises a less-used binding path, so it is off by default. Warning: if a game shows wrong or corrupted geometry, textures, or shading, or crashes on load, turn this off.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        VStack(alignment: .leading, spacing: 4) {
                             Toggle("Extended Command Batching", isOn: configManager.experimentalExtendedCommitThreshold)
                             Text("Metal only. Submit larger batches of GPU work per command buffer, reducing how often work is flushed to the GPU. Rendering is unchanged, but larger batches raise GPU latency and memory use, which can shift frame pacing or, in extreme scenes, trigger a GPU timeout.")
                                 .font(.caption)

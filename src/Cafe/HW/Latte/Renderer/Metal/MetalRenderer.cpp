@@ -985,6 +985,7 @@ void MetalRenderer::AppendOverlayDebugInfo()
     ImGui::Text("Triangle fans              %u", m_performanceMonitor.m_triangleFans);
     ImGui::Text("Snapshot uploads           %llu KB (reuses: %u)", static_cast<unsigned long long>(m_performanceMonitor.m_snapshotBytes / 1024), m_performanceMonitor.m_snapshotReuses);
     ImGui::Text("Argument buffer encodes    %u (reuses: %u)", m_performanceMonitor.m_argumentBufferEncodes, m_performanceMonitor.m_argumentBufferReuses);
+    ImGui::Text("Direct-binding draws       %u", m_performanceMonitor.m_directBindingDraws);
 
     ImGui::Text("--- Pass fragmentation (per frame) ---");
     ImGui::Text("Draw calls                 %u", m_performanceMonitor.m_drawCalls);
@@ -3274,6 +3275,13 @@ bool MetalRenderer::BindStageResources(MTL::RenderCommandEncoder* renderCommandE
         }
         
         argumentBindings[MetalArgumentBuffer::Dummy] = {MetalArgumentBinding::Type::Constant, nullptr, 0};
+    }
+    else
+    {
+        // Experimental "Direct Shader Bindings": this eligible game shader has no argument buffer, so its
+        // resources are bound straight to the render encoder in the branches below. Count it as proof the
+        // conversion happened (stays 0 when the toggle is OFF, since every game shader then has an encoder).
+        m_performanceMonitor.m_directBindingDraws++;
     }
     
     MTL::RenderStages renderStage = MTL::RenderStageVertex;
