@@ -203,7 +203,7 @@ namespace GX2
 	{
 		const uint64 _diagT0 = PPCTimer_getRawTsc(); // TEMP diagnostic: vsync blocking
 		__OSLockScheduler();
-		g_vsyncThreadQueue.GetPtr()->queueAndWait(coreinit::OSGetCurrentThread());
+		g_vsyncThreadQueue.GetPtr()->queueAndWait(coreinit::OSGetCurrentThread(), (uint32)GuestInternalCaller::Vsync); // Layer 3 TEMP: tag caller
 		__OSUnlockScheduler();
 		AddGuestWaitTsc(GuestWaitCategory::Vsync, _diagT0); // TEMP diagnostic (main-core gated no-op elsewhere)
 	}
@@ -214,7 +214,7 @@ namespace GX2
 			return; // dont wait if no flip is requested
 		const uint64 _diagT0 = PPCTimer_getRawTsc(); // TEMP diagnostic: flip blocking (real waits only, after early return)
 		__OSLockScheduler();
-		g_flipThreadQueue.GetPtr()->queueAndWait(coreinit::OSGetCurrentThread());
+		g_flipThreadQueue.GetPtr()->queueAndWait(coreinit::OSGetCurrentThread(), (uint32)GuestInternalCaller::Flip); // Layer 3 TEMP: tag caller
 		__OSUnlockScheduler();
 		AddGuestWaitTsc(GuestWaitCategory::Flip, _diagT0); // TEMP diagnostic (main-core gated no-op elsewhere)
 	}

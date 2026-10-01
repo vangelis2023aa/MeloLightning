@@ -55,7 +55,10 @@ void gx2Export_GX2SwapScanBuffers(PPCInterpreter_t* hCPU)
 	// core. Publish the just-finished frame's span + per-category guest wait sums and re-arm the clock.
 	// Gated to the main core so the span matches the accumulators that are added only on that core.
 	if (GX2::sGX2MainCoreIndex == coreinit::OSGetCoreId())
+	{
+		GX2::SetProducerThread((void*)coreinit::OSGetCurrentThread()); // Layer 3 TEMP: tag the critical-path thread
 		GX2::PublishGuestFrameAtMainCoreSwap();
+	}
 
 	bool isPokken = false;
 

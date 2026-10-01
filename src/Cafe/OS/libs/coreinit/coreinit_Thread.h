@@ -121,7 +121,8 @@ namespace coreinit
 		// puts the thread on the waiting queue and changes state to WAITING
 		// relinquishes timeslice
 		// always uses thread->waitQueueLink
-		void queueAndWait(OSThread_t* thread);
+		// diagCaller: Layer 3 TEMP diagnostic tag only (0 = untagged/"Other"); does NOT affect behavior
+		void queueAndWait(OSThread_t* thread, uint32 diagCaller = 0);
 		void queueOnly(OSThread_t* thread);
 
 		// counterparts for queueAndWait

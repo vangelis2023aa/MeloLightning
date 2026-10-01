@@ -1103,6 +1103,29 @@ void MetalRenderer::AppendOverlayDebugInfo()
             ImGui::Text("Guest active/unaccounted     %.2f ms (derived)", gActiveMs);
             ImGui::Text("Guest-internal (qAndW)       %.2f ms", gInternalMs);
             ImGui::Text("Truly unaccounted            %.2f ms (derived)", gTrulyUnaccMs);
+            // Layer 3: decompose the SAME Guest-internal (qAndW) total by caller tag and by producer
+            // (critical path) vs other main-core threads. Per-caller sum ~= Guest-internal above (modulo
+            // a few-ns second-TSC-read skew). GpuRetire stays ~0 by construction (GX2WaitTimeStamp uses
+            // TCLWaitTimestamp, not queueAndWait). Counts are per-frame wait entries on the main core.
+            const double gGIOtherMs  = PPCTimer_tscToMicroseconds(gft.prevGICallerTsc[(uint32)GX2::GuestInternalCaller::Other].load(std::memory_order_relaxed)) / 1000.0;
+            const double gGIFlipMs   = PPCTimer_tscToMicroseconds(gft.prevGICallerTsc[(uint32)GX2::GuestInternalCaller::Flip].load(std::memory_order_relaxed)) / 1000.0;
+            const double gGIVsyncMs  = PPCTimer_tscToMicroseconds(gft.prevGICallerTsc[(uint32)GX2::GuestInternalCaller::Vsync].load(std::memory_order_relaxed)) / 1000.0;
+            const double gGIRetireMs = PPCTimer_tscToMicroseconds(gft.prevGICallerTsc[(uint32)GX2::GuestInternalCaller::GpuRetire].load(std::memory_order_relaxed)) / 1000.0;
+            const unsigned gGIOtherN  = (unsigned)gft.prevGICallerCount[(uint32)GX2::GuestInternalCaller::Other].load(std::memory_order_relaxed);
+            const unsigned gGIFlipN   = (unsigned)gft.prevGICallerCount[(uint32)GX2::GuestInternalCaller::Flip].load(std::memory_order_relaxed);
+            const unsigned gGIVsyncN  = (unsigned)gft.prevGICallerCount[(uint32)GX2::GuestInternalCaller::Vsync].load(std::memory_order_relaxed);
+            const unsigned gGIRetireN = (unsigned)gft.prevGICallerCount[(uint32)GX2::GuestInternalCaller::GpuRetire].load(std::memory_order_relaxed);
+            const double   gGIProducerMs = PPCTimer_tscToMicroseconds(gft.prevGIProducerTsc.load(std::memory_order_relaxed)) / 1000.0;
+            const unsigned gGIProducerN  = (unsigned)gft.prevGIProducerCount.load(std::memory_order_relaxed);
+            double gGIOtherThreadsMs = gInternalMs - gGIProducerMs; // non-producer (parallel worker) share
+            if (gGIOtherThreadsMs < 0.0) gGIOtherThreadsMs = 0.0;
+            ImGui::Text("  qAndW by caller (time / count):");
+            ImGui::Text("    Other (mutex/evt/sem/..)   %.2f ms / %u", gGIOtherMs, gGIOtherN);
+            ImGui::Text("    Flip                       %.2f ms / %u", gGIFlipMs, gGIFlipN);
+            ImGui::Text("    Vsync                      %.2f ms / %u", gGIVsyncMs, gGIVsyncN);
+            ImGui::Text("    GPU-retire (expect ~0)     %.2f ms / %u", gGIRetireMs, gGIRetireN);
+            ImGui::Text("  qAndW producer/crit-path     %.2f ms / %u", gGIProducerMs, gGIProducerN);
+            ImGui::Text("  qAndW other main-core thr.   %.2f ms (derived)", gGIOtherThreadsMs);
         }
     }
 

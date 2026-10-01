@@ -8,7 +8,7 @@ namespace coreinit
 	// puts the thread on the waiting queue and changes state to WAITING
 	// relinquishes timeslice
 	// always uses thread->waitQueueLink
-	void OSThreadQueueInternal::queueAndWait(OSThread_t* thread)
+	void OSThreadQueueInternal::queueAndWait(OSThread_t* thread, uint32 diagCaller)
 	{
 		cemu_assert_debug(__OSHasSchedulerLock());
 		cemu_assert_debug(thread->waitQueueLink.next == nullptr && thread->waitQueueLink.prev == nullptr);
@@ -23,6 +23,9 @@ namespace coreinit
 		const uint64 _diagT0 = PPCTimer_getRawTsc();
 		PPCCore_switchToSchedulerWithLock();
 		GX2::AddGuestWaitTsc(GX2::GuestWaitCategory::GuestInternal, _diagT0);
+		// Layer 3 TEMP diagnostic (behavior-neutral): decompose the SAME block by caller tag and by
+		// producer/other thread. Keeps the Layer-2 total above intact; main-core gated inside the helper.
+		GX2::AddGuestInternalBreakdown(diagCaller, _diagT0, (void*)thread);
 		cemu_assert_debug(thread->state == OSThread_t::THREAD_STATE::STATE_RUNNING);
 	}
 
