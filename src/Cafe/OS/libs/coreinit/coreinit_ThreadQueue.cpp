@@ -5,6 +5,22 @@
 namespace coreinit
 {
 
+	// Layer 4 TEMP diagnostic (behavior-neutral): if the thread being woken is the GX2 producer
+	// (critical-path) thread, record who performs the wake - the current thread's guest id + name +
+	// core - plus a per-frame wake count. This is the "other side" of the producer's queueAndWait:
+	// it names the thread/path that satisfies the wait. All callers already hold the scheduler lock,
+	// so OSGetCurrentThread()/OSGetCoreId() are valid here; relaxed-atomic stores + a pointer compare
+	// only. NOT core-gated (the waker may run on any core - that is the point). No behavior change.
+	static void _diagRecordWakeIfProducer(OSThread_t* wokenThread)
+	{
+		if (!GX2::IsProducerThread((void*)wokenThread))
+			return;
+		OSThread_t* waker = coreinit::OSGetCurrentThread();
+		GX2::RecordProducerWake(waker ? (uint32)(uint16)waker->id : 0u,
+			waker ? waker->threadName.GetPtr() : nullptr,
+			(uint32)coreinit::OSGetCoreId());
+	}
+
 	// puts the thread on the waiting queue and changes state to WAITING
 	// relinquishes timeslice
 	// always uses thread->waitQueueLink
@@ -25,7 +41,11 @@ namespace coreinit
 		GX2::AddGuestWaitTsc(GX2::GuestWaitCategory::GuestInternal, _diagT0);
 		// Layer 3 TEMP diagnostic (behavior-neutral): decompose the SAME block by caller tag and by
 		// producer/other thread. Keeps the Layer-2 total above intact; main-core gated inside the helper.
-		GX2::AddGuestInternalBreakdown(diagCaller, _diagT0, (void*)thread);
+		// Layer 4 TEMP diagnostic: also pass the blocking thread's guest id + name so the producer's
+		// single longest wait can be attributed to an exact primitive + thread (helper is main-core gated).
+		GX2::AddGuestInternalBreakdown(diagCaller, _diagT0, (void*)thread,
+			thread ? (uint32)(uint16)thread->id : 0u,
+			thread ? thread->threadName.GetPtr() : nullptr);
 		cemu_assert_debug(thread->state == OSThread_t::THREAD_STATE::STATE_RUNNING);
 	}
 
@@ -47,6 +67,7 @@ namespace coreinit
 		thread->state = OSThread_t::THREAD_STATE::STATE_READY;
 		thread->currentWaitQueue = nullptr;
 		coreinit::__OSAddReadyThreadToRunQueue(thread);
+		_diagRecordWakeIfProducer(thread); // Layer 4 TEMP diagnostic (behavior-neutral)
 		// todo - if waking up a thread on the same core with higher priority, reschedule
 	}
 
@@ -150,6 +171,7 @@ namespace coreinit
 			thread->state = OSThread_t::THREAD_STATE::STATE_READY;
 			thread->currentWaitQueue = nullptr;
 			coreinit::__OSAddReadyThreadToRunQueue(thread);
+			_diagRecordWakeIfProducer(thread); // Layer 4 TEMP diagnostic (behavior-neutral)
 			if (reschedule && thread->suspendCounter == 0 && PPCInterpreter_getCurrentInstance() && __OSCoreShouldSwitchToThread(coreinit::OSGetCurrentThread(), thread, sharedPriorityAndAffinityWorkaround))
 				shouldReschedule = true;
 		}
@@ -170,6 +192,7 @@ namespace coreinit
 			thread->state = OSThread_t::THREAD_STATE::STATE_READY;
 			thread->currentWaitQueue = nullptr;
 			coreinit::__OSAddReadyThreadToRunQueue(thread);
+			_diagRecordWakeIfProducer(thread); // Layer 4 TEMP diagnostic (behavior-neutral)
 			if (reschedule && thread->suspendCounter == 0 && PPCInterpreter_getCurrentInstance() && __OSCoreShouldSwitchToThread(coreinit::OSGetCurrentThread(), thread, sharedPriorityAndAffinityWorkaround))
 				shouldReschedule = true;
 		}

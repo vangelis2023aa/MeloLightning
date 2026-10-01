@@ -4,6 +4,7 @@
 #include "Cafe/OS/libs/coreinit/coreinit_Alarm.h"
 #include "Cafe/OS/libs/coreinit/coreinit_Time.h"
 #include "util/helpers/fspinlock.h"
+#include "Cafe/OS/libs/gx2/GX2GuestFrameTiming.h" // Layer 4 TEMP diagnostic: tag queueAndWait call sites by primitive (behavior-neutral)
 
 namespace coreinit
 {
@@ -44,7 +45,7 @@ namespace coreinit
 		else
 		{
 			// enter wait queue
-			event->threadQueue.queueAndWait(OSGetCurrentThread());
+			event->threadQueue.queueAndWait(OSGetCurrentThread(), (uint32)GX2::GuestInternalCaller::Event); // Layer 4 TEMP tag
 		}
 	}
 
@@ -101,7 +102,7 @@ namespace coreinit
 			data.threadQueue = &event->threadQueue;
 			data.hasTimeout = false;
 			auto hostAlarm = coreinit::OSHostAlarmCreate(OSGetTime() + coreinit::EspressoTime::ConvertNsToTimerTicks(timeout), 0, _OSWaitEventWithTimeoutHandler, &data);
-			event->threadQueue.queueAndWait(OSGetCurrentThread());
+			event->threadQueue.queueAndWait(OSGetCurrentThread(), (uint32)GX2::GuestInternalCaller::Event); // Layer 4 TEMP tag
 			coreinit::OSHostAlarmDestroy(hostAlarm);
 			if (data.hasTimeout)
 			{
@@ -254,7 +255,7 @@ namespace coreinit
 				if (failedAttempts >= 0x800)
 					cemuLog_log(LogType::Force, "Detected long-term contested OSLockMutex");
 				currentThread->waitingForMutex = mutex;
-				mutex->threadQueue.queueAndWait(currentThread);
+				mutex->threadQueue.queueAndWait(currentThread, (uint32)GX2::GuestInternalCaller::Mutex); // Layer 4 TEMP tag
 				currentThread->waitingForMutex = nullptr;
 				failedAttempts++;
 			}
@@ -364,7 +365,7 @@ namespace coreinit
 		if (!mutex->threadQueue.isEmpty())
 			mutex->threadQueue.wakeupEntireWaitQueue(false);
 		// wait on condition
-		cond->threadQueue.queueAndWait(currentThread);
+		cond->threadQueue.queueAndWait(currentThread, (uint32)GX2::GuestInternalCaller::Cond); // Layer 4 TEMP tag
 		// reacquire mutex
 		OSLockMutexInternal(mutex);
 		mutex->lockCount = prevLockCount;
@@ -400,7 +401,7 @@ namespace coreinit
 				semaphore->count = prevCount - 1;
 				return prevCount;
 			}
-			semaphore->threadQueue.queueAndWait(OSGetCurrentThread());
+			semaphore->threadQueue.queueAndWait(OSGetCurrentThread(), (uint32)GX2::GuestInternalCaller::Semaphore); // Layer 4 TEMP tag
 		}
 	}
 
@@ -608,7 +609,7 @@ namespace coreinit
 		if (!fastMutex->threadQueueSmall.isEmpty())
 			fastMutex->threadQueueSmall.wakeupEntireWaitQueue(false);
 		// wait on condition
-		fastCond->threadQueue.queueAndWait(OSGetCurrentThread());
+		fastCond->threadQueue.queueAndWait(OSGetCurrentThread(), (uint32)GX2::GuestInternalCaller::Cond); // Layer 4 TEMP tag
 		// reacquire mutex
 		__OSUnlockScheduler();
 		OSFastMutex_LockInternal(fastMutex);

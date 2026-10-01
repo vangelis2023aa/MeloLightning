@@ -1,5 +1,6 @@
 #include "Cafe/OS/common/OSCommon.h"
 #include "Cafe/OS/libs/coreinit/coreinit_MessageQueue.h"
+#include "Cafe/OS/libs/gx2/GX2GuestFrameTiming.h" // Layer 4 TEMP diagnostic: tag queueAndWait call sites by primitive (behavior-neutral)
 
 namespace coreinit
 {
@@ -37,7 +38,7 @@ namespace coreinit
 		{
 			if ((flags & OS_MESSAGE_BLOCK))
 			{
-				msgQueue->threadQueueReceive.queueAndWait(OSGetCurrentThread());
+				msgQueue->threadQueueReceive.queueAndWait(OSGetCurrentThread(), (uint32)GX2::GuestInternalCaller::MsgQueueRecv); // Layer 4 TEMP tag
 			}
 			else
 			{
@@ -86,7 +87,7 @@ namespace coreinit
 		{
 			if ((flags & OS_MESSAGE_BLOCK))
 			{
-				msgQueue->threadQueueSend.queueAndWait(OSGetCurrentThread());																  
+				msgQueue->threadQueueSend.queueAndWait(OSGetCurrentThread(), (uint32)GX2::GuestInternalCaller::MsgQueueSend); // Layer 4 TEMP tag																  
 			}
 			else
 			{
