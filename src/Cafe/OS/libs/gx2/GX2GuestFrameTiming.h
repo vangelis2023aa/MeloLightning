@@ -34,6 +34,21 @@
 // ordering, locking, timing or synchronization. The Layer-2 total counter is kept intact and the
 // per-category sum should match it (modulo a few-ns raw-TSC skew from a second clock read).
 //
+// Layer 4 (this change, committed separately — SAFE REIMPLEMENTATION): subdivides the former
+// catch-all "Other" caller into the specific guest primitives (mutex, event, semaphore, cond,
+// message-queue recv/send, sleep-ticks, sleep-thread, join) so ONE device run can name exactly
+// which primitive the producer's long queueAndWait belongs to. It does this PURELY by tagging the
+// existing queueAndWait CALL SITES (the OSLockMutex / OSWaitEvent / OSReceiveMessage / ... wait
+// functions already pass the Layer-3 diagCaller argument; we just pass the specific value instead
+// of defaulting to Other) plus three extra relaxed-atomic accumulators inside the SAME Layer-3
+// breakdown helper that already runs on the main core: a per-primitive producer split and the
+// producer's single longest wait this frame (its primitive + duration). An earlier Layer-4 attempt
+// also instrumented the scheduler wake funnels (wakeupEntireWaitQueue / wakeupSingleThreadWaitQueue
+// / cancelWait) to trace the waker thread; that broke launch and is DELIBERATELY NOT redone here —
+// no scheduler/wake-funnel code is touched, no guest thread-name pointers are dereferenced, and the
+// wake-side ("who satisfies the wait") trace is intentionally deferred. All additions stay on the
+// existing main-core gate, so the per-primitive sums still reconstruct the Layer-2 total.
+//
 // Clock/atomics/threading: identical to Layer 1 (PPCTimer_getRawTsc, relaxed atomics, single-
 // writer main core, cross-thread overlay read).
 //
@@ -58,14 +73,48 @@ namespace GX2
 	};
 
 	// Layer 3: diagnostic-only caller tag passed into queueAndWait. Values are stable array indices.
+	// Layer 4: indices 0-3 are unchanged (overlay compat); 4-12 subdivide the former "Other" bucket
+	// by the specific guest primitive, tagged purely at each wait CALL SITE (no scheduler changes).
 	enum class GuestInternalCaller : uint32
 	{
-		Other     = 0, // mutex / event / semaphore / cond / message-queue / sleep / join / etc.
-		Flip      = 1, // GX2WaitForFlip
-		Vsync     = 2, // GX2WaitForVsync
-		GpuRetire = 3, // reserved; GX2WaitTimeStamp uses TCLWaitTimestamp (NOT queueAndWait) -> stays ~0
-		Count     = 4,
+		Other        = 0,  // untagged queueAndWait callers (should be ~empty once Layer 4 tagging is in)
+		Flip         = 1,  // GX2WaitForFlip
+		Vsync        = 2,  // GX2WaitForVsync
+		GpuRetire    = 3,  // reserved; GX2WaitTimeStamp uses TCLWaitTimestamp (NOT queueAndWait) -> stays ~0
+		Mutex        = 4,  // OSLockMutex contention (blocking path only; OSFastMutex direct-switch bypasses the funnel)
+		Event        = 5,  // OSWaitEvent / OSWaitEventWithTimeout
+		Semaphore    = 6,  // OSWaitSemaphore
+		Cond         = 7,  // OSWaitCond / OSFastCond_Wait
+		MsgQueueRecv = 8,  // OSReceiveMessage (blocking)
+		MsgQueueSend = 9,  // OSSendMessage (blocking, queue full)
+		SleepTicks   = 10, // OSSleepTicks
+		SleepThread  = 11, // OSSleepThread
+		Join         = 12, // OSJoinThread
+		Count        = 13,
 	};
+
+	// Layer 4: pure name helper for the overlay. String literals only — no pointer dereference, no
+	// guest thread-name access, nothing that can fault. Safe to call from the Latte overlay thread.
+	inline const char* GuestInternalCallerName(uint32 caller)
+	{
+		switch ((GuestInternalCaller)caller)
+		{
+		case GuestInternalCaller::Other:        return "Other";
+		case GuestInternalCaller::Flip:         return "Flip";
+		case GuestInternalCaller::Vsync:        return "Vsync";
+		case GuestInternalCaller::GpuRetire:    return "GpuRetire";
+		case GuestInternalCaller::Mutex:        return "Mutex";
+		case GuestInternalCaller::Event:        return "Event";
+		case GuestInternalCaller::Semaphore:    return "Semaphore";
+		case GuestInternalCaller::Cond:         return "Cond";
+		case GuestInternalCaller::MsgQueueRecv: return "MsgQueue-recv";
+		case GuestInternalCaller::MsgQueueSend: return "MsgQueue-send";
+		case GuestInternalCaller::SleepTicks:   return "SleepTicks";
+		case GuestInternalCaller::SleepThread:  return "SleepThread";
+		case GuestInternalCaller::Join:         return "Join";
+		default:                                return "?";
+		}
+	}
 
 	struct GuestFrameTimingState
 	{
@@ -82,6 +131,13 @@ namespace GX2
 		// Layer 3: producer (critical-path) share of the SAME total; non-producer = total - producer.
 		std::atomic<uint64> curGIProducerTsc{0};
 		std::atomic<uint32> curGIProducerCount{0};
+		// Layer 4: per-primitive producer (critical-path) split — same gate, parallel to curGICaller*.
+		std::atomic<uint64> curGICallerProducerTsc[kGICallerCount]{};
+		std::atomic<uint32> curGICallerProducerCount[kGICallerCount]{};
+		// Layer 4: producer's single longest queueAndWait this frame (primitive index + duration only;
+		// NO thread id/name, NO pointer deref). Lets one run name the primitive behind the long wait.
+		std::atomic<uint64> curProducerMaxWaitTsc{0};
+		std::atomic<uint32> curProducerMaxWaitCaller{0};
 
 		// --- published snapshot of the last COMPLETED guest frame; read by the overlay (Latte thread) ---
 		std::atomic<uint64> prevFrameSpanTsc{0};
@@ -94,6 +150,11 @@ namespace GX2
 		std::atomic<uint32> prevGICallerCount[kGICallerCount]{};
 		std::atomic<uint64> prevGIProducerTsc{0};
 		std::atomic<uint32> prevGIProducerCount{0};
+		// Layer 4 published snapshots
+		std::atomic<uint64> prevGICallerProducerTsc[kGICallerCount]{};
+		std::atomic<uint32> prevGICallerProducerCount[kGICallerCount]{};
+		std::atomic<uint64> prevProducerMaxWaitTsc{0};
+		std::atomic<uint32> prevProducerMaxWaitCaller{0};
 		std::atomic<uint32> prevValid{0};
 
 		// Layer 3: handle of the thread that drives GX2SwapScanBuffers on the main core (critical path).
@@ -145,6 +206,15 @@ namespace GX2
 		{
 			s.curGIProducerTsc.fetch_add(dt, std::memory_order_relaxed);
 			s.curGIProducerCount.fetch_add(1, std::memory_order_relaxed);
+			// Layer 4: per-primitive producer split + running producer longest-wait (primitive + duration
+			// only). Single-writer on the main core, so load/compare/store on the max needs no CAS.
+			s.curGICallerProducerTsc[caller].fetch_add(dt, std::memory_order_relaxed);
+			s.curGICallerProducerCount[caller].fetch_add(1, std::memory_order_relaxed);
+			if (dt > s.curProducerMaxWaitTsc.load(std::memory_order_relaxed))
+			{
+				s.curProducerMaxWaitTsc.store(dt, std::memory_order_relaxed);
+				s.curProducerMaxWaitCaller.store(caller, std::memory_order_relaxed);
+			}
 		}
 	}
 
@@ -164,9 +234,13 @@ namespace GX2
 			{
 				s.prevGICallerTsc[i].store(s.curGICallerTsc[i].load(std::memory_order_relaxed), std::memory_order_relaxed);
 				s.prevGICallerCount[i].store(s.curGICallerCount[i].load(std::memory_order_relaxed), std::memory_order_relaxed);
+				s.prevGICallerProducerTsc[i].store(s.curGICallerProducerTsc[i].load(std::memory_order_relaxed), std::memory_order_relaxed);
+				s.prevGICallerProducerCount[i].store(s.curGICallerProducerCount[i].load(std::memory_order_relaxed), std::memory_order_relaxed);
 			}
 			s.prevGIProducerTsc.store(s.curGIProducerTsc.load(std::memory_order_relaxed), std::memory_order_relaxed);
 			s.prevGIProducerCount.store(s.curGIProducerCount.load(std::memory_order_relaxed), std::memory_order_relaxed);
+			s.prevProducerMaxWaitTsc.store(s.curProducerMaxWaitTsc.load(std::memory_order_relaxed), std::memory_order_relaxed);
+			s.prevProducerMaxWaitCaller.store(s.curProducerMaxWaitCaller.load(std::memory_order_relaxed), std::memory_order_relaxed);
 			s.prevValid.store(1, std::memory_order_relaxed);
 		}
 		s.curGpuRetireWaitTsc.store(0, std::memory_order_relaxed);
@@ -177,9 +251,13 @@ namespace GX2
 		{
 			s.curGICallerTsc[i].store(0, std::memory_order_relaxed);
 			s.curGICallerCount[i].store(0, std::memory_order_relaxed);
+			s.curGICallerProducerTsc[i].store(0, std::memory_order_relaxed);
+			s.curGICallerProducerCount[i].store(0, std::memory_order_relaxed);
 		}
 		s.curGIProducerTsc.store(0, std::memory_order_relaxed);
 		s.curGIProducerCount.store(0, std::memory_order_relaxed);
+		s.curProducerMaxWaitTsc.store(0, std::memory_order_relaxed);
+		s.curProducerMaxWaitCaller.store(0, std::memory_order_relaxed);
 		s.curFrameStartTsc.store(now, std::memory_order_relaxed);
 	}
 }

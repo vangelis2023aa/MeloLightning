@@ -1126,6 +1126,32 @@ void MetalRenderer::AppendOverlayDebugInfo()
             ImGui::Text("    GPU-retire (expect ~0)     %.2f ms / %u", gGIRetireMs, gGIRetireN);
             ImGui::Text("  qAndW producer/crit-path     %.2f ms / %u", gGIProducerMs, gGIProducerN);
             ImGui::Text("  qAndW other main-core thr.   %.2f ms (derived)", gGIOtherThreadsMs);
+            // Layer 4: subdivide the former "Other" caller into the specific guest primitive and show
+            // each primitive's producer (critical-path) split, then the producer's single longest
+            // queueAndWait this frame named by primitive. Pure reads of published counters — no thread
+            // name/pointer deref, no wake-side trace. Per-primitive sum ~= the "Other" line above.
+            auto giLine = [&](const char* label, GX2::GuestInternalCaller c)
+            {
+                const uint32 idx = (uint32)c;
+                const double   tMs = PPCTimer_tscToMicroseconds(gft.prevGICallerTsc[idx].load(std::memory_order_relaxed)) / 1000.0;
+                const unsigned n   = (unsigned)gft.prevGICallerCount[idx].load(std::memory_order_relaxed);
+                const double   pMs = PPCTimer_tscToMicroseconds(gft.prevGICallerProducerTsc[idx].load(std::memory_order_relaxed)) / 1000.0;
+                const unsigned pN  = (unsigned)gft.prevGICallerProducerCount[idx].load(std::memory_order_relaxed);
+                ImGui::Text("    %-11s %6.2f ms / %-4u (prod %5.2f ms / %u)", label, tMs, n, pMs, pN);
+            };
+            ImGui::Text("  Layer 4 - qAndW by primitive (time / count, producer split):");
+            giLine("Mutex",      GX2::GuestInternalCaller::Mutex);
+            giLine("Event",      GX2::GuestInternalCaller::Event);
+            giLine("Semaphore",  GX2::GuestInternalCaller::Semaphore);
+            giLine("Cond",       GX2::GuestInternalCaller::Cond);
+            giLine("MsgQ-recv",  GX2::GuestInternalCaller::MsgQueueRecv);
+            giLine("MsgQ-send",  GX2::GuestInternalCaller::MsgQueueSend);
+            giLine("SleepTicks", GX2::GuestInternalCaller::SleepTicks);
+            giLine("SleepThrd",  GX2::GuestInternalCaller::SleepThread);
+            giLine("Join",       GX2::GuestInternalCaller::Join);
+            const double   gGIMaxWaitMs     = PPCTimer_tscToMicroseconds(gft.prevProducerMaxWaitTsc.load(std::memory_order_relaxed)) / 1000.0;
+            const uint32   gGIMaxWaitCaller = gft.prevProducerMaxWaitCaller.load(std::memory_order_relaxed);
+            ImGui::Text("  producer longest wait        %.2f ms  [%s]", gGIMaxWaitMs, GX2::GuestInternalCallerName(gGIMaxWaitCaller));
         }
     }
 

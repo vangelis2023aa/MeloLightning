@@ -2,6 +2,7 @@
 #include "Cafe/HW/Espresso/PPCCallback.h"
 #include "Cafe/OS/RPL/rpl.h"
 #include "Cafe/OS/libs/coreinit/coreinit_Thread.h"
+#include "Cafe/OS/libs/gx2/GX2GuestFrameTiming.h" // Layer 4 TEMP: queueAndWait caller tags (diagnostic-only)
 #include "Cafe/OS/libs/coreinit/coreinit_Time.h"
 #include "Cafe/OS/libs/coreinit/coreinit_Alarm.h"
 #include "Cafe/OS/libs/snd_core/ax.h"
@@ -688,7 +689,7 @@ namespace coreinit
 		OSInitThreadQueue(_threadQueue.GetPointer());
 		__OSLockScheduler();
 		OSHostAlarm* hostAlarm = OSHostAlarmCreate(OSGetTime() + ticks, 0, _OSSleepTicks_alarmHandler, _threadQueue.GetPointer());
-		_threadQueue.GetPointer()->queueAndWait(OSGetCurrentThread());
+		_threadQueue.GetPointer()->queueAndWait(OSGetCurrentThread(), (uint32)GX2::GuestInternalCaller::SleepTicks); // Layer 4 TEMP tag
 		OSHostAlarmDestroy(hostAlarm);
 		__OSUnlockScheduler();
 	}
@@ -723,7 +724,7 @@ namespace coreinit
 		{
 			cemu_assert_debug(thread->joinQueue.isEmpty());
 			// thread still running, wait in join queue
-			thread->joinQueue.queueAndWait(OSGetCurrentThread());
+			thread->joinQueue.queueAndWait(OSGetCurrentThread(), (uint32)GX2::GuestInternalCaller::Join); // Layer 4 TEMP tag
 		}
 		else if (thread->state != OSThread_t::THREAD_STATE::STATE_MORIBUND)
 		{
@@ -885,7 +886,7 @@ namespace coreinit
 	void OSSleepThread(OSThreadQueue* threadQueue)
 	{
 		__OSLockScheduler();
-		threadQueue->queueAndWait(OSGetCurrentThread());
+		threadQueue->queueAndWait(OSGetCurrentThread(), (uint32)GX2::GuestInternalCaller::SleepThread); // Layer 4 TEMP tag
 		__OSUnlockScheduler();
 	}
 
