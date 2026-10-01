@@ -1,5 +1,6 @@
 #include "Cafe/OS/common/OSCommon.h"
 #include "Cafe/OS/libs/coreinit/coreinit_Thread.h"
+#include "Cafe/OS/libs/gx2/GX2GuestFrameTiming.h" // Layer 2: TEMP diagnostic, guest-internal queueAndWait timing
 
 namespace coreinit
 {
@@ -15,7 +16,13 @@ namespace coreinit
 		this->addThreadByPriority(thread, &thread->waitQueueLink);
 		cemu_assert_debug(thread->state == OSThread_t::THREAD_STATE::STATE_RUNNING);
 		thread->state = OSThread_t::THREAD_STATE::STATE_WAITING;
+		// Layer 2 TEMP diagnostic (behavior-neutral): bracket ONLY the actual block. On Cemu's fiber-based
+		// scheduler the host C++ stack frame (and _diagT0) is preserved across the switch, so t1-t0 is the
+		// wall-clock the current guest thread was descheduled. Main-core gated inside AddGuestWaitTsc, so this
+		// is a no-op accumulate for every non-main-core thread. See GX2GuestFrameTiming.h for the overlap note.
+		const uint64 _diagT0 = PPCTimer_getRawTsc();
 		PPCCore_switchToSchedulerWithLock();
+		GX2::AddGuestWaitTsc(GX2::GuestWaitCategory::GuestInternal, _diagT0);
 		cemu_assert_debug(thread->state == OSThread_t::THREAD_STATE::STATE_RUNNING);
 	}
 

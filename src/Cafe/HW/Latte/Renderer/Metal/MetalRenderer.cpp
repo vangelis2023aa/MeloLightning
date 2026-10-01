@@ -1072,10 +1072,12 @@ void MetalRenderer::AppendOverlayDebugInfo()
         // delimited by successive GX2SwapScanBuffers on the GX2 main submit core, split into the
         // blocking categories timed at their funnels (GX2WaitTimeStamp / GX2WaitForFlip /
         // GX2WaitForVsync). Same raw-TSC clock as the Latte timers above, so directly comparable.
-        // "active/unaccounted" is the derived remainder = span - the three measured waits; in this
-        // first build it STILL contains any guest-internal (queueAndWait) blocking that is not yet
-        // instrumented, so it is NOT purely active guest execution. 1-frame skew vs the CURRENT
-        // counts, same as the block above.
+        // Layer 2 adds "Guest-internal (qAndW)" = time blocked inside queueAndWait, the common funnel
+        // for ALL guest thread-blocking. It is a SUPERSET of flip/vsync (both call queueAndWait), while
+        // GPU-retire is a separate GPU wait. "Truly unaccounted" = span - guest-internal: the closest
+        // host-wall-clock estimate of non-blocking guest time, but NOT asserted to be CPU execution
+        // (on a single host thread per core the descheduled interval can include other threads' work).
+        // 1-frame skew vs the CURRENT counts, same as the block above.
         GX2::GuestFrameTimingState& gft = GX2::GetGuestFrameTiming();
         if (gft.prevValid.load(std::memory_order_relaxed) == 0)
         {
@@ -1083,19 +1085,24 @@ void MetalRenderer::AppendOverlayDebugInfo()
         }
         else
         {
-            const double gSpanMs   = PPCTimer_tscToMicroseconds(gft.prevFrameSpanTsc.load(std::memory_order_relaxed)) / 1000.0;
-            const double gRetireMs = PPCTimer_tscToMicroseconds(gft.prevGpuRetireWaitTsc.load(std::memory_order_relaxed)) / 1000.0;
-            const double gFlipMs   = PPCTimer_tscToMicroseconds(gft.prevFlipWaitTsc.load(std::memory_order_relaxed)) / 1000.0;
-            const double gVsyncMs  = PPCTimer_tscToMicroseconds(gft.prevVsyncWaitTsc.load(std::memory_order_relaxed)) / 1000.0;
-            const double gWaitSum  = gRetireMs + gFlipMs + gVsyncMs;
-            double gActiveMs = gSpanMs - gWaitSum; // derived: active guest exec + any uninstrumented guest-internal wait
+            const double gSpanMs     = PPCTimer_tscToMicroseconds(gft.prevFrameSpanTsc.load(std::memory_order_relaxed)) / 1000.0;
+            const double gRetireMs   = PPCTimer_tscToMicroseconds(gft.prevGpuRetireWaitTsc.load(std::memory_order_relaxed)) / 1000.0;
+            const double gFlipMs     = PPCTimer_tscToMicroseconds(gft.prevFlipWaitTsc.load(std::memory_order_relaxed)) / 1000.0;
+            const double gVsyncMs    = PPCTimer_tscToMicroseconds(gft.prevVsyncWaitTsc.load(std::memory_order_relaxed)) / 1000.0;
+            const double gInternalMs = PPCTimer_tscToMicroseconds(gft.prevGuestInternalWaitTsc.load(std::memory_order_relaxed)) / 1000.0;
+            const double gWaitSum    = gRetireMs + gFlipMs + gVsyncMs;
+            double gActiveMs = gSpanMs - gWaitSum; // Layer 1 remainder = span - GX2 waits (still includes guest-internal)
             if (gActiveMs < 0.0) gActiveMs = 0.0;
+            double gTrulyUnaccMs = gSpanMs - gInternalMs; // Layer 2 remainder = span - guest-internal (flip/vsync are inside it)
+            if (gTrulyUnaccMs < 0.0) gTrulyUnaccMs = 0.0;
             ImGui::Text("Guest frame span             %.2f ms", gSpanMs);
             ImGui::Text("GPU-retire wait (WaitTS)     %.2f ms", gRetireMs);
             ImGui::Text("Flip wait (GX2WaitForFlip)   %.2f ms", gFlipMs);
             ImGui::Text("Vsync wait (GX2WaitForVsync) %.2f ms", gVsyncMs);
             ImGui::Text("Guest wait sum               %.2f ms", gWaitSum);
             ImGui::Text("Guest active/unaccounted     %.2f ms (derived)", gActiveMs);
+            ImGui::Text("Guest-internal (qAndW)       %.2f ms", gInternalMs);
+            ImGui::Text("Truly unaccounted            %.2f ms (derived)", gTrulyUnaccMs);
         }
     }
 
