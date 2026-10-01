@@ -625,7 +625,7 @@ struct SettingsView: View {
                     
                     VStack(alignment: .leading) {
                         Text("Text Scale: \(Int(configManager.overlayTextScale.wrappedValue))%")
-                        Slider(value: configManager.overlayTextScale, in: 30...200, step: 5)
+                        Slider(value: configManager.overlayTextScale, in: 50...200, step: 25)
                     }
                     
                     Toggle("FPS", isOn: configManager.overlayFPS)

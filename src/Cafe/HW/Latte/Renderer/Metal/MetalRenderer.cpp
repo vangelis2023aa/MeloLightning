@@ -1126,45 +1126,6 @@ void MetalRenderer::AppendOverlayDebugInfo()
             ImGui::Text("    GPU-retire (expect ~0)     %.2f ms / %u", gGIRetireMs, gGIRetireN);
             ImGui::Text("  qAndW producer/crit-path     %.2f ms / %u", gGIProducerMs, gGIProducerN);
             ImGui::Text("  qAndW other main-core thr.   %.2f ms (derived)", gGIOtherThreadsMs);
-            // Layer 4: subdivide the former catch-all "Other" caller into the specific guest primitives,
-            // each with its producer (critical-path) split. These reconstruct the "Other" line above (now
-            // that every known primitive is tagged, Other should fall to ~0). Then name the producer's
-            // single longest wait this frame (what the critical path is actually blocked on) and the
-            // thread that woke it (the "other side"). Same prev* snapshot, 1-frame skew as the lines above.
-            auto giLine = [&](const char* label, GX2::GuestInternalCaller c)
-            {
-                const uint32   idx  = (uint32)c;
-                const double   tMs  = PPCTimer_tscToMicroseconds(gft.prevGICallerTsc[idx].load(std::memory_order_relaxed)) / 1000.0;
-                const unsigned n    = (unsigned)gft.prevGICallerCount[idx].load(std::memory_order_relaxed);
-                const double   ptMs = PPCTimer_tscToMicroseconds(gft.prevGICallerProducerTsc[idx].load(std::memory_order_relaxed)) / 1000.0;
-                const unsigned pn   = (unsigned)gft.prevGICallerProducerCount[idx].load(std::memory_order_relaxed);
-                ImGui::Text("    %-11s %6.2f ms / %-3u (prod %6.2f / %u)", label, tMs, n, ptMs, pn);
-            };
-            ImGui::Text("  qAndW primitive (time / count | producer):");
-            giLine("Mutex",       GX2::GuestInternalCaller::Mutex);
-            giLine("Event",       GX2::GuestInternalCaller::Event);
-            giLine("Semaphore",   GX2::GuestInternalCaller::Semaphore);
-            giLine("Cond",        GX2::GuestInternalCaller::Cond);
-            giLine("MsgQ-recv",   GX2::GuestInternalCaller::MsgQueueRecv);
-            giLine("MsgQ-send",   GX2::GuestInternalCaller::MsgQueueSend);
-            giLine("SleepTicks",  GX2::GuestInternalCaller::SleepTicks);
-            giLine("SleepThread", GX2::GuestInternalCaller::SleepThread);
-            giLine("Join",        GX2::GuestInternalCaller::Join);
-            {
-                const double   pMaxMs  = PPCTimer_tscToMicroseconds(gft.prevProducerMaxWaitTsc.load(std::memory_order_relaxed)) / 1000.0;
-                const uint32   pCaller = gft.prevProducerMaxWaitCaller.load(std::memory_order_relaxed);
-                const unsigned pTid    = (unsigned)gft.prevProducerThreadId.load(std::memory_order_relaxed);
-                char pName[GX2::GuestFrameTimingState::kGINameLen];
-                GX2::GIReadName(gft.prevProducerThreadName, pName, (uint32)sizeof(pName));
-                ImGui::Text("  producer longest wait: %s %.2f ms (thr#%u '%s')",
-                    GX2::GuestInternalCallerName(pCaller), pMaxMs, pTid, pName);
-                const unsigned wTid  = (unsigned)gft.prevProducerWakerId.load(std::memory_order_relaxed);
-                const unsigned wCore = (unsigned)gft.prevProducerWakerCore.load(std::memory_order_relaxed);
-                const unsigned wN    = (unsigned)gft.prevProducerWakeCount.load(std::memory_order_relaxed);
-                char wName[GX2::GuestFrameTimingState::kGINameLen];
-                GX2::GIReadName(gft.prevProducerWakerName, wName, (uint32)sizeof(wName));
-                ImGui::Text("  producer woken by:     thr#%u '%s' core %u (wakes: %u)", wTid, wName, wCore, wN);
-            }
         }
     }
 
