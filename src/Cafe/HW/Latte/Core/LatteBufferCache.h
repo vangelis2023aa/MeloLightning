@@ -9,6 +9,10 @@ void LatteBufferCache_invalidate(MPTR physAddress, uint32 size);
 
 void LatteBufferCache_notifyDCFlush(MPTR address, uint32 size);
 void LatteBufferCache_processDCFlushQueue();
+// Monotonic counter bumped once each time processDCFlushQueue drains a non-empty flush queue (i.e. whenever
+// guest memory becomes newly visible-changed to the GPU). Used as a cheap content-version token: if it is
+// unchanged between two reads on the Latte thread, no DC-flush was applied in between.
+uint32 LatteBufferCache_getDCFlushEpoch();
 
 void LatteBufferCache_processDeallocations();
 void LatteBufferCache_incrementalCleanup();

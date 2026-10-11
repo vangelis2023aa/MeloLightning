@@ -33,21 +33,41 @@ MetalMemoryManager::~MetalMemoryManager()
     }
 }
 
-MetalSynchronizedHeapAllocator::AllocatorReservation* MetalMemoryManager::GetCachedSnapshot(uint32 slot, const void* data, uint32 size, uint32 firstByte)
+MetalSynchronizedHeapAllocator::AllocatorReservation* MetalMemoryManager::GetCachedSnapshot(uint32 slot, const void* data, uint32 size, uint32 firstByte, uint32 sourceVersion)
 {
     cemu_assert_debug(slot < SnapshotCount && firstByte <= size);
     m_mtlr->GetCommandBuffer();
     auto& snapshot = m_snapshots[slot];
     const auto* source = static_cast<const uint8*>(data);
     const uint32 copySize = size - firstByte;
-    if (snapshot.allocation && snapshot.firstByte <= firstByte && snapshot.endByte >= size &&
-        std::memcmp(snapshot.allocation->memPtr + firstByte, source + firstByte, copySize) == 0)
+    if (snapshot.allocation && snapshot.firstByte <= firstByte && snapshot.endByte >= size)
     {
-        m_mtlr->GetPerformanceMonitor().m_snapshotReuses++;
-        return snapshot.allocation;
+        // Experimental "Skip Unchanged Buffer Re-compares" (default OFF): the caller passes a content-version
+        // (the DC-flush epoch) for guest-memory sources. If both the version and the source base pointer are
+        // unchanged since this snapshot was captured, no DC-flush made the range newly visible-changed, so the
+        // covered bytes are provably identical and the O(bytes) memcmp below can be skipped. OFF (or any caller
+        // that passes SNAPSHOT_NO_VERSION, e.g. the renderer-written support buffer) falls through to the memcmp,
+        // byte-identical to before. A changed version/pointer also falls through, so a real update is never missed.
+        if (sourceVersion != SNAPSHOT_NO_VERSION && snapshot.sourceVersion == sourceVersion && snapshot.sourcePtr == source)
+        {
+            m_mtlr->GetPerformanceMonitor().m_snapshotReuses++;
+            m_mtlr->GetPerformanceMonitor().m_snapshotEpochSkips++;
+            m_mtlr->GetPerformanceMonitor().m_snapshotEpochSkipBytes += copySize;
+            return snapshot.allocation;
+        }
+        if (std::memcmp(snapshot.allocation->memPtr + firstByte, source + firstByte, copySize) == 0)
+        {
+            m_mtlr->GetPerformanceMonitor().m_snapshotReuses++;
+            if (sourceVersion != SNAPSHOT_NO_VERSION)
+            {
+                snapshot.sourcePtr = source;
+                snapshot.sourceVersion = sourceVersion;
+            }
+            return snapshot.allocation;
+        }
     }
-    
-    
+
+
     if (snapshot.allocation)
         m_snapshotAllocator.FreeReservation(snapshot.allocation);
     snapshot.allocation = m_snapshotAllocator.AllocateBufferMemory(std::max(size, 1u), 256);
@@ -57,6 +77,11 @@ MetalSynchronizedHeapAllocator::AllocatorReservation* MetalMemoryManager::GetCac
     m_snapshotAllocator.FlushReservation(snapshot.allocation);
     m_mtlr->GetPerformanceMonitor().m_snapshotBytes += copySize;
     m_mtlr->GetPerformanceMonitor().m_snapshotMisses++;
+    if (sourceVersion != SNAPSHOT_NO_VERSION)
+    {
+        snapshot.sourcePtr = source;
+        snapshot.sourceVersion = sourceVersion;
+    }
     return snapshot.allocation;
 }
 

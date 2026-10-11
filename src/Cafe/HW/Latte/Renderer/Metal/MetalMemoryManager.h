@@ -20,9 +20,13 @@ public:
     static constexpr uint32 UniformSnapshotBase = VertexSnapshotBase + MAX_MTL_VERTEX_BUFFERS;
     static constexpr uint32 SupportSnapshotBase = UniformSnapshotBase + METAL_GENERAL_SHADER_TYPE_TOTAL * MAX_MTL_BUFFERS;
     static constexpr uint32 SnapshotCount = SupportSnapshotBase + METAL_SHADER_TYPE_TOTAL;
-    
-    
-    MetalSynchronizedHeapAllocator::AllocatorReservation* GetCachedSnapshot(uint32 slot, const void* data, uint32 size, uint32 firstByte = 0);
+    // Sentinel content-version meaning "not versioned": GetCachedSnapshot then always does the full memcmp
+    // (the existing behavior). Callers whose source is guest memory pass LatteBufferCache_getDCFlushEpoch()
+    // instead, but only while the experimental epoch-skip toggle is ON; otherwise they pass this sentinel.
+    static constexpr uint32 SNAPSHOT_NO_VERSION = 0xFFFFFFFFu;
+
+
+    MetalSynchronizedHeapAllocator::AllocatorReservation* GetCachedSnapshot(uint32 slot, const void* data, uint32 size, uint32 firstByte = 0, uint32 sourceVersion = SNAPSHOT_NO_VERSION);
     MetalSynchronizedHeapAllocator::AllocatorReservation* GetCachedArgumentBuffer(uint32 stage, MTL::ArgumentEncoder* encoder, const MetalArgumentBindings& bindings);
     void GetSnapshotStats(uint32& numBuffers, size_t& totalSize, size_t& freeSize) const
     {
@@ -124,6 +128,12 @@ private:
         MetalSynchronizedHeapAllocator::AllocatorReservation* allocation = nullptr;
         uint32 firstByte = 0;
         uint32 endByte = 0;
+        // Experimental epoch-skip bookkeeping (only written when a caller supplies a real content-version).
+        // sourcePtr identifies the source range base this snapshot was captured from; sourceVersion is the
+        // DC-flush epoch at capture. If both still match on a later call, the covered bytes are provably
+        // unchanged and the full-range memcmp is skipped. Left at the no-version sentinel when unused.
+        const void* sourcePtr = nullptr;
+        uint32 sourceVersion = SNAPSHOT_NO_VERSION;
     } m_snapshots[SnapshotCount]{};
 
     struct ArgumentSnapshot

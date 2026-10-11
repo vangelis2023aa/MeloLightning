@@ -12,6 +12,13 @@ public:
     uint32 m_triangleFans = 0;
     uint64 m_snapshotBytes = 0;
     uint32 m_snapshotReuses = 0;
+    // Experimental "Skip Unchanged Buffer Re-compares" (experimental_buffer_snapshot_epoch_skip) proof counters:
+    // m_snapshotEpochSkips = snapshot reuses that skipped the full-range memcmp because the DC-flush epoch and
+    // source pointer were unchanged (a subset of m_snapshotReuses); m_snapshotEpochSkipBytes = the memcmp bytes
+    // thereby NOT compared this frame. Both 0 when the toggle is OFF. The eliminated work is exactly
+    // m_snapshotEpochSkipBytes of byte-comparison per frame; watch the cpuTime_dcBufferSync overlay line fall.
+    uint32 m_snapshotEpochSkips = 0;
+    uint64 m_snapshotEpochSkipBytes = 0;
     uint32 m_argumentBufferEncodes = 0;
     uint32 m_argumentBufferReuses = 0;
     // Experimental "Direct Shader Bindings" proof counter: number of BindStageResources calls this frame
@@ -88,6 +95,8 @@ public:
         m_triangleFans = 0;
         m_snapshotBytes = 0;
         m_snapshotReuses = 0;
+        m_snapshotEpochSkips = 0;
+        m_snapshotEpochSkipBytes = 0;
         m_argumentBufferEncodes = 0;
         m_argumentBufferReuses = 0;
         m_directBindingDraws = 0;

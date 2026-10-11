@@ -167,6 +167,10 @@ public:
 	// recomputed. Same generation+epoch+shader key. OFF => loop always runs, byte-identical. See CemuConfig
 	// experimental_arg_buffer_tex_bind_reuse.
 	[[nodiscard]] static bool ExperimentalArgBufferTexBindReuse();
+	// Metal: in the per-draw vertex/uniform buffer sync, skip GetCachedSnapshot's full-range memcmp when the
+	// snapshot's DC-flush epoch and source pointer are unchanged (no flush made the range newly visible-changed).
+	// OFF => the unconditional memcmp runs, byte-identical. See CemuConfig experimental_buffer_snapshot_epoch_skip.
+	[[nodiscard]] static bool ExperimentalBufferSnapshotEpochSkip();
 	// Metal: for a shader that stays on the argument buffer, bind ONLY its support buffer directly at a
 	// dedicated slot instead of inside the argument buffer, so its per-draw change no longer forces a
 	// whole-stage arg-buffer re-encode. Read at shader-decompile time (analyzer) and at bind time. OFF =>

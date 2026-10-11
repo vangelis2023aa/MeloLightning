@@ -999,6 +999,7 @@ void MetalRenderer::AppendOverlayDebugInfo()
         ImGui::Text("Draws per pass             %.2f", drawsPerPass);
     }
     ImGui::Text("Snapshot misses            %u", m_performanceMonitor.m_snapshotMisses);
+    ImGui::Text("Snapshot memcmp skips      %u (%llu KB)", m_performanceMonitor.m_snapshotEpochSkips, static_cast<unsigned long long>(m_performanceMonitor.m_snapshotEpochSkipBytes / 1024));
     {
         // ICB-batching premise: of m_drawCalls draws, how many continued a same-pipeline run in the same pass
         // (ICB-batchable candidates) and how long the single longest run was (best-case ICB batch size). Near-0
@@ -2525,6 +2526,12 @@ void MetalRenderer::draw_updateVertexBuffersDirectAccess(uint32 minIndex, uint32
     if (!parsedFetchShader)
         return;
 
+    // Experimental "Skip Unchanged Buffer Re-compares" (default OFF): pass the current DC-flush epoch as the
+    // snapshot content-version so GetCachedSnapshot can skip the full-range memcmp when no DC-flush has made the
+    // source newly visible-changed since capture. OFF => sentinel => the original per-draw memcmp runs unchanged.
+    const uint32 snapshotVersion = ActiveSettings::ExperimentalBufferSnapshotEpochSkip()
+        ? LatteBufferCache_getDCFlushEpoch() : MetalMemoryManager::SNAPSHOT_NO_VERSION;
+
     for (auto& bufferGroup : parsedFetchShader->bufferGroups)
     {
         uint32 bufferIndex = bufferGroup.attributeBufferIndex;
@@ -2554,7 +2561,7 @@ void MetalRenderer::draw_updateVertexBuffersDirectAccess(uint32 minIndex, uint32
             if (LatteBufferCache_hostIsRangeVolatile(bufferAddress + firstByte, bufferSize - firstByte))
             {
                 auto* allocation = m_memoryManager->GetCachedSnapshot(MetalMemoryManager::VertexSnapshotBase + bufferIndex,
-                    memory_getPointerFromVirtualOffset(bufferAddress), bufferSize, firstByte);
+                    memory_getPointerFromVirtualOffset(bufferAddress), bufferSize, firstByte, snapshotVersion);
                 
                 m_state.m_vertexBuffers[bufferIndex] = allocation->mtlBuffer;
                 m_state.m_vertexBufferOffsets[bufferIndex] = allocation->bufferOffset;
@@ -2583,6 +2590,9 @@ void MetalRenderer::draw_updateUniformBuffersDirectAccess(LatteDecompilerShader*
 {
     if (shader->uniformMode == LATTE_DECOMPILER_UNIFORM_MODE_FULL_CBANK)
     {
+        // Experimental "Skip Unchanged Buffer Re-compares" (default OFF): see draw_updateVertexBuffersDirectAccess.
+        const uint32 snapshotVersion = ActiveSettings::ExperimentalBufferSnapshotEpochSkip()
+            ? LatteBufferCache_getDCFlushEpoch() : MetalMemoryManager::SNAPSHOT_NO_VERSION;
         for (const auto& buf : shader->list_quickBufferList)
         {
             sint32 i = buf.index;
@@ -2609,7 +2619,7 @@ void MetalRenderer::draw_updateUniformBuffersDirectAccess(LatteDecompilerShader*
             if (m_memoryManager->IsRangeImported(physicalAddr, uniformSize))
             {
                 auto* allocation = m_memoryManager->GetCachedSnapshot(MetalMemoryManager::UniformSnapshotBase + shaderType * MAX_MTL_BUFFERS + bufferIndex,
-                    memory_getPointerFromVirtualOffset(physicalAddr), uniformSize);
+                    memory_getPointerFromVirtualOffset(physicalAddr), uniformSize, 0, snapshotVersion);
 
                 m_state.m_uniformBuffers[shaderType][bufferIndex] = allocation->mtlBuffer;
                 m_state.m_uniformBufferOffsets[shaderType][bufferIndex] = allocation->bufferOffset;

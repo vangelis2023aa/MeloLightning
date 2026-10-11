@@ -374,6 +374,15 @@ class ConfigManager: ObservableObject {
         }
     }
 
+    var experimentalBufferSnapshotEpochSkip: Binding<Bool> {
+        Binding {
+            self.config.experimentalBufferSnapshotEpochSkip
+        } set: {
+            self.config.experimentalBufferSnapshotEpochSkip = $0
+            self.objectWillChange.send()
+        }
+    }
+
     var experimentalSupportBufferIndirection: Binding<Bool> {
         Binding {
             self.config.experimentalSupportBufferIndirection

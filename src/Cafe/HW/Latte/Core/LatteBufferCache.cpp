@@ -1854,6 +1854,11 @@ void LatteBufferCache_processDCFlushQueue()
     });
 }
 
+uint32 LatteBufferCache_getDCFlushEpoch()
+{
+    return s_DCFlushQueueEpoch.load(std::memory_order_relaxed);
+}
+
 void LatteBufferCache_notifyDrawDone()
 {
 

@@ -253,6 +253,11 @@ bool ActiveSettings::ExperimentalArgBufferTexBindReuse()
 	return GetConfig().experimental_arg_buffer_tex_bind_reuse;
 }
 
+bool ActiveSettings::ExperimentalBufferSnapshotEpochSkip()
+{
+	return GetConfig().experimental_buffer_snapshot_epoch_skip;
+}
+
 bool ActiveSettings::ExperimentalSupportBufferIndirection()
 {
 	return GetConfig().experimental_support_buffer_indirection;

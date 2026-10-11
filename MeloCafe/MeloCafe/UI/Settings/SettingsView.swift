@@ -420,6 +420,13 @@ struct SettingsView: View {
                         }
 
                         VStack(alignment: .leading, spacing: 4) {
+                            Toggle("Skip Unchanged Buffer Re-compares", isOn: configManager.experimentalBufferSnapshotEpochSkip)
+                            Text("Metal only. Experimental. For dynamic geometry the renderer keeps a GPU copy of each vertex and uniform buffer and, on every draw, byte-compares the whole range against game memory to decide whether to re-copy it \u{2014} the single biggest per-draw memory operation in buffer setup. When ON, the renderer instead remembers when the game last published changes to that memory (its cache-flush point) and, if nothing has been published since the copy was made, reuses it and skips the comparison entirely; anything that could have changed falls back to the full compare, so the GPU still gets the same data. It only removes repeated CPU work \u{2014} no extra GPU work, no new threads. Takes effect on new draws after you change it. This relies on games flushing memory before the GPU reads it (the normal Wii U rule); if a game shows stale or flickering geometry or values, turn it off.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        VStack(alignment: .leading, spacing: 4) {
                             Toggle("Direct Support Buffer", isOn: configManager.experimentalSupportBufferIndirection)
                             Text("Metal only. Experimental. Attacks the same busy-scene slowdown as \u{201C}Direct Shader Bindings\u{201D}, but for the shaders that option cannot convert (they keep using an argument buffer). Those shaders rebuild their whole argument buffer every single draw, only because one small block of per-draw values (the \u{201C}support buffer\u{201D}) lives inside it and changes each draw. This option binds that block directly to the GPU instead, so the rest of the argument buffer stops changing and the renderer can reuse it across draws, replacing a full rebuild with a single cheap bind. It helps every shader that keeps an argument buffer, and can be combined with \u{201C}Direct Shader Bindings\u{201D} (that option handles the shaders it can convert; this one handles the rest). Turning it off restores the previous behavior exactly. Warning: if a game shows wrong or corrupted geometry, textures, or shading, turn this off.")
                                 .font(.caption)
