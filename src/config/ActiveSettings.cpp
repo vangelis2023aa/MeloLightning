@@ -248,6 +248,11 @@ bool ActiveSettings::ExperimentalBindingDirtyMasks()
 	return GetConfig().experimental_binding_dirty_masks;
 }
 
+bool ActiveSettings::ExperimentalArgBufferTexBindReuse()
+{
+	return GetConfig().experimental_arg_buffer_tex_bind_reuse;
+}
+
 bool ActiveSettings::ExperimentalSupportBufferIndirection()
 {
 	return GetConfig().experimental_support_buffer_indirection;

@@ -5,6 +5,8 @@
 
 #include "Cafe/HW/Latte/Core/LatteConst.h"
 
+#include <array>
+
 struct MetalPixelFormatSupport
 {
 	bool m_supportsR8Unorm_sRGB;
@@ -59,6 +61,21 @@ namespace MetalArgumentBuffer
 	constexpr uint32 IndexBufferSize = IndexBuffer + 1;
 	constexpr uint32 IndexType = IndexBufferSize + 1;
 }
+
+// One resolved entry of a shader's argument buffer (or a direct binding slot). Defined here (rather than in
+// MetalMemoryManager.h) so both the memory manager and the renderer can hold a MetalArgumentBindings by value
+// without the MemoryManager<->Renderer header cycle. Index-aligned with the MetalArgumentBuffer slot constants.
+struct MetalArgumentBinding
+{
+    enum class Type { Unused, Buffer, Texture, Sampler, Constant };
+    Type type = Type::Unused;
+    void* resource = nullptr;
+    size_t value = 0;
+
+    bool operator==(const MetalArgumentBinding&) const = default;
+};
+
+using MetalArgumentBindings = std::array<MetalArgumentBinding, MetalArgumentBuffer::IndexType + 1>;
 
 constexpr uint32 INVALID_UINT32 = std::numeric_limits<uint32>::max();
 constexpr size_t INVALID_OFFSET = std::numeric_limits<size_t>::max();

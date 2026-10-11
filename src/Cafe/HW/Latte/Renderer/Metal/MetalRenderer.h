@@ -681,6 +681,22 @@ private:
 	uint64 m_bindLoopEpoch[METAL_SHADER_TYPE_TOTAL] = {};
 	const void* m_bindLoopShader[METAL_SHADER_TYPE_TOTAL] = {};
 
+	// Experimental "Reuse Argument-Buffer Texture Binds" (experimental_arg_buffer_tex_bind_reuse). The
+	// argument-buffer analog of m_bindLoop* above: for a shader that STAYS on the argument buffer, the frozen
+	// Dummy/texture/sampler slots of the argument-binding array are identical for every draw in a pass, yet the
+	// texture-unit loop rebuilds them each draw. m_argTexBindCache holds that frozen slot set captured the last
+	// time the loop fully ran for the stage; when the toggle is ON and the (generation, epoch, shader) key still
+	// matches, BindStageResources restores it and skips the loop, then recomputes only the per-draw-varying slots
+	// (support buffer, uniform buffers, vertex/index). The epoch guarantees the frozen resources are still
+	// resident on the live encoder, so skipping their per-texture DeclareResidency is safe. The varying slots are
+	// Unused in the cached copy (the loop sets only Dummy/texture/sampler) and are overwritten every draw, so the
+	// cache can never carry a stale support/uniform/vertex binding. shader==nullptr => never captured. GPU-thread
+	// only; only read/written when the toggle is ON.
+	uint32 m_argTexBindGeneration[METAL_SHADER_TYPE_TOTAL] = {};
+	uint64 m_argTexBindEpoch[METAL_SHADER_TYPE_TOTAL] = {};
+	const void* m_argTexBindShader[METAL_SHADER_TYPE_TOTAL] = {};
+	MetalArgumentBindings m_argTexBindCache[METAL_SHADER_TYPE_TOTAL] = {};
+
 	// Experimental "Partial Rendering" (experimental_partial_rendering): a guest render-target clear is
 	// recorded here instead of being emitted as its own render pass, then folded into the next draw pass
 	// that targets the same subresource as a load-action=Clear (so the standalone clear's store and the

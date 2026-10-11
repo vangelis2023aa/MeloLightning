@@ -413,6 +413,13 @@ struct SettingsView: View {
                         }
 
                         VStack(alignment: .leading, spacing: 4) {
+                            Toggle("Reuse Argument-Buffer Texture Binds", isOn: configManager.experimentalArgBufferTexBindReuse)
+                            Text("Metal only. Experimental. The argument-buffer counterpart to \u{201C}Skip Repeated Texture Binds\u{201D}, so it helps the shaders that keep using an argument buffer rather than the ones \u{201C}Direct Shader Bindings\u{201D} converts. A shader's textures and samplers cannot change within a run of draws, so this resolves and records them once at the start of the run and reuses that result on later draws instead of rebuilding it every time; the per-draw values (support buffer, uniform buffers, vertex and index data) are still rebuilt each draw, and the GPU receives exactly the same bindings as before. It only removes repeated CPU work \u{2014} no extra GPU work and no new threads \u{2014} and resets whenever the run ends, the shader changes, or a new command encoder starts. Takes effect on new draws after you change it. Turn it off if you ever see wrong or missing textures.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        VStack(alignment: .leading, spacing: 4) {
                             Toggle("Direct Support Buffer", isOn: configManager.experimentalSupportBufferIndirection)
                             Text("Metal only. Experimental. Attacks the same busy-scene slowdown as \u{201C}Direct Shader Bindings\u{201D}, but for the shaders that option cannot convert (they keep using an argument buffer). Those shaders rebuild their whole argument buffer every single draw, only because one small block of per-draw values (the \u{201C}support buffer\u{201D}) lives inside it and changes each draw. This option binds that block directly to the GPU instead, so the rest of the argument buffer stops changing and the renderer can reuse it across draws, replacing a full rebuild with a single cheap bind. It helps every shader that keeps an argument buffer, and can be combined with \u{201C}Direct Shader Bindings\u{201D} (that option handles the shaders it can convert; this one handles the rest). Turning it off restores the previous behavior exactly. Warning: if a game shows wrong or corrupted geometry, textures, or shading, turn this off.")
                                 .font(.caption)

@@ -988,6 +988,7 @@ void MetalRenderer::AppendOverlayDebugInfo()
     ImGui::Text("Argument buffer encodes    %u (reuses: %u)", m_performanceMonitor.m_argumentBufferEncodes, m_performanceMonitor.m_argumentBufferReuses);
     ImGui::Text("Direct-binding draws       %u", m_performanceMonitor.m_directBindingDraws);
     ImGui::Text("Bind-loop skips            %u", m_performanceMonitor.m_bindLoopSkips);
+    ImGui::Text("Arg tex-bind reuses        %u", m_performanceMonitor.m_argBufferTexBindReuses);
     ImGui::Text("Support-buffer indirection %u", m_performanceMonitor.m_supportIndirectionDraws);
 
     ImGui::Text("--- Pass fragmentation (per frame) ---");
@@ -3512,6 +3513,17 @@ bool MetalRenderer::BindStageResources(MTL::RenderCommandEncoder* renderCommandE
     // must be re-written into argumentBindings for the whole-buffer encode every draw, so the loop must run.
     // OFF (or Direct Shader Bindings OFF) => bindLoopSkipEligible is false => the loop always runs (byte-identical).
     const bool bindLoopSkipEligible = !argumentEncoder && ActiveSettings::ExperimentalBindingDirtyMasks();
+    // Experimental "Reuse Argument-Buffer Texture Binds" (experimental_arg_buffer_tex_bind_reuse): the argument-
+    // buffer counterpart to the skip above. For an ARGUMENT-BUFFER shader the loop does not bind to the encoder;
+    // it writes the frozen Dummy/texture/sampler entries into the local argumentBindings array that is handed to
+    // GetCachedArgumentBuffer. Those entries are identical for every draw in a pass (same proof as the per-unit
+    // texture/sampler pass fast-paths), so instead of re-resolving them each draw we cache that slot set the first
+    // time the loop runs and, on later draws with a matching (generation, epoch, shader) key, restore it and skip
+    // the loop. The per-draw-varying slots (support buffer, uniform buffers, vertex/index) are written AFTER this
+    // block on every draw, so the restored copy can never supply a stale one. The epoch match guarantees the same
+    // encoder is still live, so the frozen textures declared resident on the first draw are still resident and
+    // their per-texture DeclareResidency can be skipped. OFF => eligible is false => the loop always runs.
+    const bool argTexBindReuseEligible = (argumentEncoder != nullptr) && ActiveSettings::ExperimentalArgBufferTexBindReuse();
     bool runBindLoop = true;
     if (bindLoopSkipEligible &&
         m_bindLoopShader[mtlShaderType] == static_cast<const void*>(shader) &&
@@ -3520,6 +3532,18 @@ bool MetalRenderer::BindStageResources(MTL::RenderCommandEncoder* renderCommandE
     {
         runBindLoop = false;
         m_performanceMonitor.m_bindLoopSkips++;
+    }
+    else if (argTexBindReuseEligible &&
+        m_argTexBindShader[mtlShaderType] == static_cast<const void*>(shader) &&
+        m_argTexBindGeneration[mtlShaderType] == m_drawPassGeneration &&
+        m_argTexBindEpoch[mtlShaderType] == m_encoderEpoch)
+    {
+        // Restore the frozen Dummy/texture/sampler slots resolved earlier in this pass; the varying slots in the
+        // cached copy are Unused and are overwritten by the sections below, exactly as a fresh loop would leave
+        // them before those sections run.
+        argumentBindings = m_argTexBindCache[mtlShaderType];
+        runBindLoop = false;
+        m_performanceMonitor.m_argBufferTexBindReuses++;
     }
     if (runBindLoop)
     {
@@ -3660,6 +3684,18 @@ bool MetalRenderer::BindStageResources(MTL::RenderCommandEncoder* renderCommandE
         m_bindLoopShader[mtlShaderType] = static_cast<const void*>(shader);
         m_bindLoopGeneration[mtlShaderType] = m_drawPassGeneration;
         m_bindLoopEpoch[mtlShaderType] = m_encoderEpoch;
+    }
+    if (argTexBindReuseEligible)
+    {
+        // Capture the frozen Dummy/texture/sampler slots just resolved. At this point only those slots are set
+        // (the support/uniform/vertex sections run after this block), so the cached copy holds exactly the
+        // reusable frozen set with every per-draw-varying slot left Unused. Subsequent draws in the pass restore
+        // it and skip the loop. Key on generation + epoch + shader so a pass boundary, a mid-pass encoder
+        // recreation, or a shader change forces a full re-resolve.
+        m_argTexBindCache[mtlShaderType] = argumentBindings;
+        m_argTexBindShader[mtlShaderType] = static_cast<const void*>(shader);
+        m_argTexBindGeneration[mtlShaderType] = m_drawPassGeneration;
+        m_argTexBindEpoch[mtlShaderType] = m_encoderEpoch;
     }
     } // end if (runBindLoop)
 

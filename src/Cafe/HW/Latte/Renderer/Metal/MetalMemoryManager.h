@@ -7,17 +7,8 @@
 
 #include <array>
 
-struct MetalArgumentBinding
-{
-    enum class Type { Unused, Buffer, Texture, Sampler, Constant };
-    Type type = Type::Unused;
-    void* resource = nullptr;
-    size_t value = 0;
-
-    bool operator==(const MetalArgumentBinding&) const = default;
-};
-
-using MetalArgumentBindings = std::array<MetalArgumentBinding, MetalArgumentBuffer::IndexType + 1>;
+// MetalArgumentBinding / MetalArgumentBindings are defined in MetalCommon.h (pulled in transitively here) so
+// that both this manager and MetalRenderer can store a MetalArgumentBindings by value without a header cycle.
 
 class MetalMemoryManager
 {

@@ -161,6 +161,12 @@ public:
 	// shaders only (no effect on argument-buffer shaders). Guarded by draw-pass generation + encoder epoch +
 	// shader pointer. OFF => loop always runs, byte-identical. See CemuConfig experimental_binding_dirty_masks.
 	[[nodiscard]] static bool ExperimentalBindingDirtyMasks();
+	// Metal: argument-buffer analog of ExperimentalBindingDirtyMasks. For an ARGUMENT-BUFFER shader, cache the
+	// frozen Dummy/texture/sampler argument-binding slots once per pass and restore them for draws after the
+	// first instead of re-running the texture-unit resolve+bind loop; only the per-draw-varying slots are
+	// recomputed. Same generation+epoch+shader key. OFF => loop always runs, byte-identical. See CemuConfig
+	// experimental_arg_buffer_tex_bind_reuse.
+	[[nodiscard]] static bool ExperimentalArgBufferTexBindReuse();
 	// Metal: for a shader that stays on the argument buffer, bind ONLY its support buffer directly at a
 	// dedicated slot instead of inside the argument buffer, so its per-draw change no longer forces a
 	// whole-stage arg-buffer re-encode. Read at shader-decompile time (analyzer) and at bind time. OFF =>

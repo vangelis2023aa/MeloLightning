@@ -25,6 +25,14 @@ public:
     // Direct Shader Bindings is OFF, since only direct-ABI stages are eligible). As it rises it should track the
     // number of draws-after-the-first within passes; it is the direct evidence the per-draw bind scan was elided.
     uint32 m_bindLoopSkips = 0;
+    // Experimental "Reuse Argument-Buffer Texture Binds" proof counter (experimental_arg_buffer_tex_bind_reuse):
+    // number of BindStageResources calls this frame that restored the frozen Dummy/texture/sampler argument-
+    // binding slots from the per-pass cache and skipped the texture-unit resolve+bind loop for an ARGUMENT-BUFFER
+    // stage because its (generation, encoder-epoch, shader) key still matched. 0 when the toggle is OFF. As it
+    // rises it tracks the number of draws-after-the-first within passes whose shaders stay on the argument buffer
+    // (the complement of m_bindLoopSkips, which only counts direct-ABI stages); it is the direct evidence the
+    // per-draw texture/sampler re-resolve+rebind was elided for arg-buffer shaders. Watch cpuTime_dcBindStage fall.
+    uint32 m_argBufferTexBindReuses = 0;
     // Experimental "Support Buffer Indirection" proof counter (experimental_support_buffer_indirection): number
     // of BindStageResources calls this frame that bound the support buffer DIRECTLY for a shader that is still on
     // the argument buffer (i.e. the support buffer was pulled out of the arg buffer to a dedicated slot). 0 when
@@ -84,6 +92,7 @@ public:
         m_argumentBufferReuses = 0;
         m_directBindingDraws = 0;
         m_bindLoopSkips = 0;
+        m_argBufferTexBindReuses = 0;
         m_supportIndirectionDraws = 0;
         m_drawCalls = 0;
         m_drawPassBegins = 0;

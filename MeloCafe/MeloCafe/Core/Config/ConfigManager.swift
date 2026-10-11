@@ -365,6 +365,15 @@ class ConfigManager: ObservableObject {
         }
     }
 
+    var experimentalArgBufferTexBindReuse: Binding<Bool> {
+        Binding {
+            self.config.experimentalArgBufferTexBindReuse
+        } set: {
+            self.config.experimentalArgBufferTexBindReuse = $0
+            self.objectWillChange.send()
+        }
+    }
+
     var experimentalSupportBufferIndirection: Binding<Bool> {
         Binding {
             self.config.experimentalSupportBufferIndirection
