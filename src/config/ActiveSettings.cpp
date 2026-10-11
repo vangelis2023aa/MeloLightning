@@ -258,6 +258,11 @@ bool ActiveSettings::ExperimentalBufferSnapshotEpochSkip()
 	return GetConfig().experimental_buffer_snapshot_epoch_skip;
 }
 
+bool ActiveSettings::ExperimentalDirectSupportInlineBytes()
+{
+	return GetConfig().experimental_direct_support_inline_bytes;
+}
+
 bool ActiveSettings::ExperimentalSupportBufferIndirection()
 {
 	return GetConfig().experimental_support_buffer_indirection;

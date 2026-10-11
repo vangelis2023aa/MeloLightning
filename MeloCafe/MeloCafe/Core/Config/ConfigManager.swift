@@ -383,6 +383,15 @@ class ConfigManager: ObservableObject {
         }
     }
 
+    var experimentalDirectSupportInlineBytes: Binding<Bool> {
+        Binding {
+            self.config.experimentalDirectSupportInlineBytes
+        } set: {
+            self.config.experimentalDirectSupportInlineBytes = $0
+            self.objectWillChange.send()
+        }
+    }
+
     var experimentalSupportBufferIndirection: Binding<Bool> {
         Binding {
             self.config.experimentalSupportBufferIndirection

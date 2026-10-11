@@ -990,6 +990,7 @@ void MetalRenderer::AppendOverlayDebugInfo()
     ImGui::Text("Bind-loop skips            %u", m_performanceMonitor.m_bindLoopSkips);
     ImGui::Text("Arg tex-bind reuses        %u", m_performanceMonitor.m_argBufferTexBindReuses);
     ImGui::Text("Support-buffer indirection %u", m_performanceMonitor.m_supportIndirectionDraws);
+    ImGui::Text("Support inline-bytes draws %u", m_performanceMonitor.m_supportInlineBytesDraws);
 
     ImGui::Text("--- Pass fragmentation (per frame) ---");
     ImGui::Text("Draw calls                 %u", m_performanceMonitor.m_drawCalls);
@@ -2790,6 +2791,36 @@ void MetalRenderer::SetBuffer(MTL::RenderCommandEncoder* renderCommandEncoder, M
     }
 }
 
+void MetalRenderer::SetBytes(MTL::RenderCommandEncoder* renderCommandEncoder, MetalShaderType shaderType, const void* data, size_t length, uint32 index)
+{
+    if (index >= MAX_MTL_BUFFERS)
+    {
+        cemuLog_logOnce(LogType::Force, "invalid Metal buffer binding {}", index);
+        return;
+    }
+
+    switch (shaderType)
+    {
+    case METAL_SHADER_TYPE_VERTEX:
+        renderCommandEncoder->setVertexBytes(data, length, index);
+        break;
+    case METAL_SHADER_TYPE_OBJECT:
+        renderCommandEncoder->setObjectBytes(data, length, index);
+        break;
+    case METAL_SHADER_TYPE_MESH:
+        renderCommandEncoder->setMeshBytes(data, length, index);
+        break;
+    case METAL_SHADER_TYPE_FRAGMENT:
+        renderCommandEncoder->setFragmentBytes(data, length, index);
+        break;
+    }
+
+    // The slot now holds inline command-buffer bytes, not a tracked buffer. Invalidate the encoder-state
+    // dedup for it so a later SetBuffer to the same slot (e.g. with this option off, or a different code
+    // path) always rebinds instead of being skipped as "already bound". Mirrors the setObjectBytes site.
+    m_state.m_encoderState.m_buffers[shaderType][index] = {nullptr};
+}
+
 void MetalRenderer::SetTexture(MTL::RenderCommandEncoder* renderCommandEncoder, MetalShaderType shaderType, MTL::Texture* texture, uint32 index)
 {
     if (index >= MAX_MTL_TEXTURES)
@@ -3522,6 +3553,9 @@ bool MetalRenderer::BindStageResources(MTL::RenderCommandEncoder* renderCommandE
     // Experimental per-draw-pass texture-binding fast-path toggle (same sampling/OFF-path story).
     // See MetalTextureBindCache::GetPassTexture for the correctness proof.
     const bool textureFastPathOn = ActiveSettings::ExperimentalPassTextureFastPath();
+    // Experimental "Inline Direct Support Buffer" toggle (read once per stage, atomic-bool cost when OFF).
+    // See the support-buffer section below for the correctness proof. Only ever acts on true direct-ABI shaders.
+    const bool supportInlineBytesOn = ActiveSettings::ExperimentalDirectSupportInlineBytes();
 
     // Experimental "Skip Repeated Texture Binds" (experimental_binding_dirty_masks): a shader's textures and
     // samplers are frozen for the whole draw pass, and in the DIRECT binding ABI (no argument buffer) the loop
@@ -3815,6 +3849,22 @@ bool MetalRenderer::BindStageResources(MTL::RenderCommandEncoder* renderCommandE
         }
         
         size_t size = shader->uniform.uniformRangeSize;
+        // Experimental "Inline Direct Support Buffer" (default OFF): for a TRUE direct-ABI shader (no argument
+        // encoder) whose support buffer fits Metal's inline setBytes limit, push the freshly-gathered support
+        // bytes straight into the encoder instead of taking the content-addressed snapshot. The snapshot path
+        // does, every draw, an O(size) memcmp against the previous upload plus (on a miss) a heap alloc/free,
+        // an O(size) recopy and a flush; the support buffer changes nearly every draw in busy scenes (base
+        // vertex / ALU constants), so that memcmp almost always misses and recopies anyway. setBytes delivers
+        // the identical bytes to the same binding slot in one call with no compare, no allocation and no flush.
+        // OFF, an argument-buffer/support-indirection shader, or a support buffer over the inline limit all take
+        // the exact original snapshot path below (byte-identical). Inline data is auto-resident for the draw.
+        if (!argumentEncoder && supportInlineBytesOn && size <= METAL_MAX_INLINE_BYTES_LENGTH)
+        {
+            SetBytes(renderCommandEncoder, mtlShaderType, supportBufferData, size, shader->resourceMapping.uniformVarsBufferBindingPoint);
+            m_performanceMonitor.m_supportInlineBytesDraws++;
+        }
+        else
+        {
         auto* allocation = m_memoryManager->GetCachedSnapshot(MetalMemoryManager::SupportSnapshotBase + mtlShaderType, supportBufferData, size);
         if (argumentEncoder && shader->resourceMapping.supportBufferDirectBinding < 0)
         {
@@ -3840,6 +3890,7 @@ bool MetalRenderer::BindStageResources(MTL::RenderCommandEncoder* renderCommandE
             if (argumentEncoder)
                 m_performanceMonitor.m_supportIndirectionDraws++;
         }
+        } // end else (original content-addressed support snapshot path)
     }
     if (m_captureCpuStageTimings) performanceMonitor.cpuTime_dcBindSupport.endMeasuring();
 

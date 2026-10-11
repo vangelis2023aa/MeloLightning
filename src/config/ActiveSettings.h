@@ -171,6 +171,10 @@ public:
 	// snapshot's DC-flush epoch and source pointer are unchanged (no flush made the range newly visible-changed).
 	// OFF => the unconditional memcmp runs, byte-identical. See CemuConfig experimental_buffer_snapshot_epoch_skip.
 	[[nodiscard]] static bool ExperimentalBufferSnapshotEpochSkip();
+	// Metal: for a true direct-ABI shader, bind a small support buffer via inline setBytes instead of the
+	// content-addressed snapshot (skips the per-draw memcmp + alloc + recopy + flush). OFF / arg-buffer /
+	// oversized => the original snapshot path. See CemuConfig experimental_direct_support_inline_bytes.
+	[[nodiscard]] static bool ExperimentalDirectSupportInlineBytes();
 	// Metal: for a shader that stays on the argument buffer, bind ONLY its support buffer directly at a
 	// dedicated slot instead of inside the argument buffer, so its per-draw change no longer forces a
 	// whole-stage arg-buffer re-encode. Read at shader-decompile time (analyzer) and at bind time. OFF =>

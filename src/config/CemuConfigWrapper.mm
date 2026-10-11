@@ -225,6 +225,8 @@ static CPUMode toCPUMode(ObjCCPUMode mode) {
 - (void)setExperimentalArgBufferTexBindReuse:(BOOL)v { GetConfig().experimental_arg_buffer_tex_bind_reuse = v; autoSave(); }
 - (BOOL)experimentalBufferSnapshotEpochSkip { return GetConfig().experimental_buffer_snapshot_epoch_skip.GetValue(); }
 - (void)setExperimentalBufferSnapshotEpochSkip:(BOOL)v { GetConfig().experimental_buffer_snapshot_epoch_skip = v; autoSave(); }
+- (BOOL)experimentalDirectSupportInlineBytes { return GetConfig().experimental_direct_support_inline_bytes.GetValue(); }
+- (void)setExperimentalDirectSupportInlineBytes:(BOOL)v { GetConfig().experimental_direct_support_inline_bytes = v; autoSave(); }
 - (BOOL)experimentalSupportBufferIndirection { return GetConfig().experimental_support_buffer_indirection.GetValue(); }
 - (void)setExperimentalSupportBufferIndirection:(BOOL)v { GetConfig().experimental_support_buffer_indirection = v; autoSave(); }
 

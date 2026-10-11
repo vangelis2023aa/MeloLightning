@@ -79,6 +79,9 @@ using MetalArgumentBindings = std::array<MetalArgumentBinding, MetalArgumentBuff
 
 constexpr uint32 INVALID_UINT32 = std::numeric_limits<uint32>::max();
 constexpr size_t INVALID_OFFSET = std::numeric_limits<size_t>::max();
+// Metal's documented upper bound for setVertexBytes/setFragmentBytes/... inline constant data (4 KiB).
+// Support buffers larger than this cannot use the inline path and fall back to a bound buffer.
+constexpr size_t METAL_MAX_INLINE_BYTES_LENGTH = 4096;
 
 inline size_t Align(size_t size, size_t alignment)
 {

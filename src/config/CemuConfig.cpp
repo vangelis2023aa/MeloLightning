@@ -322,6 +322,7 @@ XMLConfigParser CemuConfig::Load(XMLConfigParser& parser)
 	experimental_binding_dirty_masks = experimental.get("BindingDirtyMasks", false);
 	experimental_arg_buffer_tex_bind_reuse = experimental.get("ArgBufferTexBindReuse", false);
 	experimental_buffer_snapshot_epoch_skip = experimental.get("BufferSnapshotEpochSkip", false);
+	experimental_direct_support_inline_bytes = experimental.get("DirectSupportInlineBytes", false);
 	experimental_support_buffer_indirection = experimental.get("SupportBufferIndirection", false);
 	experimental_audio_buffer_blocks = experimental.get("AudioBufferBlocks", 0);
 	experimental_audio_anti_clip = experimental.get("AudioAntiClip", 0);
@@ -541,6 +542,7 @@ XMLConfigParser CemuConfig::Save(XMLConfigParser& parser)
 	experimental.set("BindingDirtyMasks", experimental_binding_dirty_masks.GetValue());
 	experimental.set("ArgBufferTexBindReuse", experimental_arg_buffer_tex_bind_reuse.GetValue());
 	experimental.set("BufferSnapshotEpochSkip", experimental_buffer_snapshot_epoch_skip.GetValue());
+	experimental.set("DirectSupportInlineBytes", experimental_direct_support_inline_bytes.GetValue());
 	experimental.set("SupportBufferIndirection", experimental_support_buffer_indirection.GetValue());
 	experimental.set("AudioBufferBlocks", experimental_audio_buffer_blocks.GetValue());
 	experimental.set("AudioAntiClip", experimental_audio_anti_clip.GetValue());
