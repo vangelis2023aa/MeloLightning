@@ -435,7 +435,12 @@ namespace coreinit
 		semaphore->count = prevCount + 1;
 		// Layer 5 TEMP (diagnostic, semaphore-API-level): record identity/time/signaler BEFORE the
 		// unchanged wakeup. Same guest MPTR as the wait side; wakeup implementation is NOT touched.
-		GX2::NoteSemaphoreSignal(MEMPTR<OSSemaphore>(semaphore).GetMPTR(), MEMPTR<void>(OSGetCurrentThread()).GetMPTR(), (uint32)OSGetCoreId(), (uint32)prevCount, semaphore->threadQueue.isEmpty() ? 0u : 1u);
+		// OSGetCoreId() dereferences the current PPC instance, which is NULL when a semaphore is
+		// signaled from a host thread (async-callback marshalling in padscore/nsyshid/swkbd fires on
+		// host threads during launch). Guard it exactly like coreinit_Thread.cpp does and report
+		// 0xFF (= host / no guest core) in that case. OSGetCurrentThread() is already null-safe.
+		const uint32 _l5SigCore = PPCInterpreter_getCurrentInstance() ? (uint32)OSGetCoreId() : 0xFFu;
+		GX2::NoteSemaphoreSignal(MEMPTR<OSSemaphore>(semaphore).GetMPTR(), MEMPTR<void>(OSGetCurrentThread()).GetMPTR(), _l5SigCore, (uint32)prevCount, semaphore->threadQueue.isEmpty() ? 0u : 1u);
 		semaphore->threadQueue.wakeupEntireWaitQueue(reschedule);
 		return prevCount;
 	}
