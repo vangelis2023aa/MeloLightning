@@ -273,6 +273,11 @@ bool ActiveSettings::ExperimentalAArch64FastBranchReg()
 	return GetConfig().experimental_aarch64_fast_branch_reg;
 }
 
+bool ActiveSettings::ExperimentalAArch64NzcvBranchFusion()
+{
+	return GetConfig().experimental_aarch64_nzcv_branch_fusion;
+}
+
 bool ActiveSettings::ExperimentalMetalFXEnable()
 {
 	return GetConfig().experimental_metalfx_enable;

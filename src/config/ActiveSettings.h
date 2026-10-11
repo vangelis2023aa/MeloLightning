@@ -184,6 +184,11 @@ public:
 	// jump-table index into a single lsl (guarded by offsetof(jump table)==0). Read at block compile time.
 	// OFF or non-zero offset => original mov+add codegen. See CemuConfig experimental_aarch64_fast_branch_reg.
 	[[nodiscard]] static bool ExperimentalAArch64FastBranchReg();
+	// AArch64 JIT: gate the arch-neutral IML pass that fuses compare + boolean + conditional-jump into a
+	// single NZCV-flag conditional branch (cmp; b.cond). OFF => the pass never runs, so no X86_CMP /
+	// X86_EFLAGS_JCC IML is ever produced and codegen is byte-identical. Read at block compile time.
+	// See CemuConfig experimental_aarch64_nzcv_branch_fusion.
+	[[nodiscard]] static bool ExperimentalAArch64NzcvBranchFusion();
 
 	// Experimental MetalFX spatial upscaling (Metal/iOS). Read once by MetalRenderer at construction
 	// and latched; see CemuConfig experimental_metalfx_* flags.

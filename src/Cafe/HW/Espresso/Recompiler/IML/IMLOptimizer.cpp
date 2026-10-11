@@ -8,6 +8,8 @@
 
 #include "Common/FileStream.h"
 
+#include "config/ActiveSettings.h"
+
 #include <boost/container/static_vector.hpp>
 #include <boost/container/small_vector.hpp>
 
@@ -706,6 +708,13 @@ void IMLOptimizer_StandardOptimizationPassForSegment(IMLOptimizerRegIOAnalysis& 
 #ifdef ARCH_X86_64
 	// x86 specific optimizations
 	IMLOptimizerX86_SubstituteCJumpForEflagsJump(regIoAnalysis, seg); // this pass should be applied late since it creates invisible eflags dependencies (which would break further register dependency analysis)
+#elif defined(__aarch64__)
+	// AArch64: the pass is arch-neutral (only the op names X86_CMP / X86_EFLAGS_JCC are x86-flavored). It is
+	// gated behind an experimental, default-OFF toggle; when OFF it never runs, so no X86_CMP / X86_EFLAGS_JCC
+	// IML is produced and AArch64 codegen is byte-identical to the untoggled build. The AArch64 backend emits
+	// the fused CMP + NZCV conditional branch. Same late-application caveat (invisible flag dependencies).
+	if (ActiveSettings::ExperimentalAArch64NzcvBranchFusion())
+		IMLOptimizerX86_SubstituteCJumpForEflagsJump(regIoAnalysis, seg);
 #endif
 }
 

@@ -185,6 +185,15 @@ class ConfigManager: ObservableObject {
         }
     }
 
+    var experimentalAArch64NzcvBranchFusion: Binding<Bool> {
+        Binding {
+            self.config.experimentalAArch64NzcvBranchFusion
+        } set: {
+            self.config.experimentalAArch64NzcvBranchFusion = $0
+            self.objectWillChange.send()
+        }
+    }
+
     var experimentalSamplerCacheFastPath: Binding<Bool> {
         Binding {
             self.config.experimentalSamplerCacheFastPath

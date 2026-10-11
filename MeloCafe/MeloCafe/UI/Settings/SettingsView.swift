@@ -342,6 +342,13 @@ struct SettingsView: View {
                     }
 
                     VStack(alignment: .leading, spacing: 4) {
+                        Toggle("Compare-Branch Fusion (JIT)", isOn: configManager.experimentalAArch64NzcvBranchFusion)
+                        Text("CPU only. In the ARM64 recompiler, fuse a compare, its true/false result, and the branch that tests it into a single compare + conditional branch that reads the processor's condition flags directly, dropping the extra instructions that build and test a boolean. This reuses the recompiler's existing, long-proven compare-to-flags analysis (shared with the desktop build) and only changes how the ARM64 branch is emitted; it only applies when the recompiler can prove the result is used nowhere else and the flags are untouched in between, so results are identical. Takes effect on code compiled after you change it (fully after a restart). Turn it off if a game misbehaves.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    VStack(alignment: .leading, spacing: 4) {
                         Toggle("Batch GX2 Write-Gather Bursts (CPU)", isOn: configManager.experimentalGX2WriteGatherBatch)
                         Text("CPU only. When the game sets a pixel shader, write its block of input-control registers to the GPU command buffer in one batched copy instead of one word at a time. Each per-word write otherwise re-resolves the current CPU core and byte-swaps twice; batching resolves the core once and copies the identical bytes. The command stream is byte-for-byte identical, so this is safe to leave on; the saving is small and shows mainly in shader-heavy scenes.")
                             .font(.caption)

@@ -200,10 +200,22 @@ struct NegativeRegValueJumpInfo
 	WReg regValue;
 };
 
+// Experimental "Compare-Branch Fusion": a conditional branch that reads the NZCV flags set by a preceding
+// X86_CMP (the arch-neutral eflags-jump pass is reused to produce it). cond is the branch-taken condition;
+// condNegated is its exact complement (resolved via the two IML->Arm64 condition maps, not by bit tricks),
+// used only for the out-of-range trampoline. Only produced when experimental_aarch64_nzcv_branch_fusion is ON.
+struct ConditionalNzcvJumpInfo
+{
+	IMLSegment* target;
+	Cond cond;
+	Cond condNegated;
+};
+
 using JumpInfo = std::variant<
 	UnconditionalJumpInfo,
 	ConditionalRegJumpInfo,
-	NegativeRegValueJumpInfo>;
+	NegativeRegValueJumpInfo,
+	ConditionalNzcvJumpInfo>;
 
 struct AArch64GenContext_t : CodeGenerator
 {
@@ -234,6 +246,7 @@ struct AArch64GenContext_t : CodeGenerator
 	void fpr_r(IMLInstruction* imlInstruction);
 	void fpr_compare(IMLInstruction* imlInstruction);
 	void cjump(IMLInstruction* imlInstruction, IMLSegment* imlSegment);
+	void nzcv_jcc(IMLInstruction* imlInstruction, IMLSegment* imlSegment);
 	void jump(IMLSegment* imlSegment);
 	void conditionalJumpCycleCheck(IMLSegment* imlSegment);
 
@@ -361,6 +374,33 @@ struct AArch64GenContext_t : CodeGenerator
 
 		Label skipJump;
 		tbz(jump.regValue, 31, skipJump);
+		addressOffset -= 4;
+
+		// in +/-128MB
+		if (-0x8000000 <= addressOffset && addressOffset <= 0x7ffffff)
+		{
+			b(addressOffset);
+			L(skipJump);
+			return true;
+		}
+
+		cemu_assert_suspicious();
+
+		return false;
+	}
+
+	bool handleJump(sint64 addressOffset, const ConditionalNzcvJumpInfo& jump)
+	{
+		// B.cond has +/-1MB range
+		if (-0x100000 <= addressOffset && addressOffset <= 0xfffff)
+		{
+			b(jump.cond, addressOffset);
+			return true;
+		}
+
+		// out of range: branch over an unconditional B using the inverted condition
+		Label skipJump;
+		b(jump.condNegated, skipJump);
 		addressOffset -= 4;
 
 		// in +/-128MB
@@ -670,6 +710,13 @@ bool AArch64GenContext_t::r_r(IMLInstruction* imlInstruction)
 	{
 		clz(regR, regA);
 	}
+	else if (imlInstruction->operation == PPCREC_IML_OP_X86_CMP)
+	{
+		// NZCV compare for the fused compare-branch pass (experimental_aarch64_nzcv_branch_fusion). Both
+		// operands are read-only (regR holds the compare's first operand regA, regA holds regB -- see
+		// make_r_r in IMLOptimizerX86_SubstituteCJumpForEflagsJump). Mirrors compare()'s cmp(regA, regB).
+		cmp(regR, regA);
+	}
 	else
 	{
 		cemuLog_log(LogType::Recompiler, "PPCRecompilerAArch64Gen_imlInstruction_r_r(): Unsupported operation {:x}", imlInstruction->operation);
@@ -690,6 +737,13 @@ bool AArch64GenContext_t::r_s32(IMLInstruction* imlInstruction)
 	else if (imlInstruction->operation == PPCREC_IML_OP_LEFT_ROTATE)
 	{
 		ror(reg, reg, 32 - (imm32 & 0x1f));
+	}
+	else if (imlInstruction->operation == PPCREC_IML_OP_X86_CMP)
+	{
+		// NZCV compare-with-immediate for the fused compare-branch pass. Register operand is read-only.
+		// Mirrors compare_s32()'s cmp_imm(regA, imm, TEMP_GPR1.WReg); the scratch materialization (when the
+		// immediate is not directly encodable) is flag-neutral and the flag-setting cmp is emitted last.
+		cmp_imm(reg, imm32, TEMP_GPR1.WReg);
 	}
 	else
 	{
@@ -946,6 +1000,33 @@ Cond ImlCondToArm64Cond(IMLCondition condition)
 	}
 }
 
+// Exact complement of ImlCondToArm64Cond, matching the x86 backend's _x86CondInverted mapping. Used by the
+// NZCV compare-branch fusion to emit the branch-not-taken condition. Kept as an explicit table (rather than a
+// condition-code bit flip) so the inversion is auditable and independent of the Cond enum's numeric values.
+Cond ImlCondToArm64CondInverted(IMLCondition condition)
+{
+	switch (condition)
+	{
+	case IMLCondition::EQ:
+		return Cond::NE;
+	case IMLCondition::NEQ:
+		return Cond::EQ;
+	case IMLCondition::UNSIGNED_GT:
+		return Cond::LS;
+	case IMLCondition::UNSIGNED_LT:
+		return Cond::HS;
+	case IMLCondition::SIGNED_GT:
+		return Cond::LE;
+	case IMLCondition::SIGNED_LT:
+		return Cond::GE;
+	default:
+	{
+		cemu_assert_suspicious();
+		return Cond::EQ;
+	}
+	}
+}
+
 void AArch64GenContext_t::compare(IMLInstruction* imlInstruction)
 {
 	WReg regR = gpReg<WReg>(imlInstruction->op_compare.regR);
@@ -973,6 +1054,24 @@ void AArch64GenContext_t::cjump(IMLInstruction* imlInstruction, IMLSegment* imlS
 		.target = imlSegment->nextSegmentBranchTaken,
 		.regBool = regBool,
 		.mustBeTrue = imlInstruction->op_conditional_jump.mustBeTrue,
+	});
+}
+
+void AArch64GenContext_t::nzcv_jcc(IMLInstruction* imlInstruction, IMLSegment* imlSegment)
+{
+	// Fused conditional branch consuming the NZCV flags set by the preceding X86_CMP. The eligibility
+	// (that a cmp set these flags, the boolean is dead, and nothing clobbers the flags in between) was
+	// established by the shared IMLOptimizerX86_SubstituteCJumpForEflagsJump pass. invertedCondition mirrors
+	// the x86 backend: when set, the branch is taken on the complement of the compare condition. Both the
+	// taken condition and its complement are resolved here so the out-of-range trampoline needs no bit tricks.
+	const IMLCondition imlCond = imlInstruction->op_x86_eflags_jcc.cond;
+	const bool inverted = imlInstruction->op_x86_eflags_jcc.invertedCondition;
+	const Cond condTaken = inverted ? ImlCondToArm64CondInverted(imlCond) : ImlCondToArm64Cond(imlCond);
+	const Cond condNegated = inverted ? ImlCondToArm64Cond(imlCond) : ImlCondToArm64CondInverted(imlCond);
+	prepareJump(ConditionalNzcvJumpInfo{
+		.target = imlSegment->nextSegmentBranchTaken,
+		.cond = condTaken,
+		.condNegated = condNegated,
 	});
 }
 
@@ -1649,6 +1748,8 @@ bool PPCRecompiler_generateAArch64Code(struct PPCRecFunction_t* PPCRecFunction, 
                 aarch64GenContext.compare_s32(imlInstruction);
             else if (imlInstruction->type == PPCREC_IML_TYPE_CONDITIONAL_JUMP)
                 aarch64GenContext.cjump(imlInstruction, segIt);
+            else if (imlInstruction->type == PPCREC_IML_TYPE_X86_EFLAGS_JCC)
+                aarch64GenContext.nzcv_jcc(imlInstruction, segIt);
             else if (imlInstruction->type == PPCREC_IML_TYPE_JUMP)
                 aarch64GenContext.jump(segIt);
             else if (imlInstruction->type == PPCREC_IML_TYPE_CJUMP_CYCLE_CHECK)
