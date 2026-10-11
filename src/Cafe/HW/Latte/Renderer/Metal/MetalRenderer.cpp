@@ -1152,6 +1152,74 @@ void MetalRenderer::AppendOverlayDebugInfo()
             const double   gGIMaxWaitMs     = PPCTimer_tscToMicroseconds(gft.prevProducerMaxWaitTsc.load(std::memory_order_relaxed)) / 1000.0;
             const uint32   gGIMaxWaitCaller = gft.prevProducerMaxWaitCaller.load(std::memory_order_relaxed);
             ImGui::Text("  producer longest wait        %.2f ms  [%s]", gGIMaxWaitMs, GX2::GuestInternalCallerName(gGIMaxWaitCaller));
+            // Layer 5: identify the exact semaphore behind the producer's Semaphore qAndW wait, its
+            // signaler, and the signal->wake timing. Pure reads of published Layer-5 snapshots (guest
+            // MPTRs + raw-TSC deltas; no thread-name deref, no scheduler/wake-funnel instrumentation).
+            // The signal tsc is captured just before the existing wakeup, so Signal->wake is the
+            // signal->return latency, NOT by itself proof of scheduler delay.
+            ImGui::Text("  Layer 5 - producer semaphore:");
+            const uint32 l5ProdAddr = gft.prevProdSemAddr.load(std::memory_order_relaxed);
+            if (l5ProdAddr == 0)
+            {
+                ImGui::Text("    (no producer semaphore wait last frame)");
+            }
+            else
+            {
+                const uint64 l5WS  = gft.prevProdSemWaitStartTsc.load(std::memory_order_relaxed);
+                const uint64 l5WE  = gft.prevProdSemWaitEndTsc.load(std::memory_order_relaxed);
+                const uint64 l5Sig = gft.prevProdSemSignalTsc.load(std::memory_order_relaxed);
+                const double l5WaitMs = PPCTimer_tscToMicroseconds(l5WE - l5WS) / 1000.0;
+                unsigned l5W = 0, l5P = 0, l5S = 0;
+                for (uint32 i = 0; i < GX2::GuestFrameTimingState::kSemSlots; i++)
+                {
+                    if (gft.prevSemAddr[i].load(std::memory_order_relaxed) != l5ProdAddr) continue;
+                    l5W = (unsigned)gft.prevSemWaitCount[i].load(std::memory_order_relaxed);
+                    l5P = (unsigned)gft.prevSemPassCount[i].load(std::memory_order_relaxed);
+                    l5S = (unsigned)gft.prevSemSignalCount[i].load(std::memory_order_relaxed);
+                    break;
+                }
+                ImGui::Text("    ID/addr: 0x%08X  Waiter: 0x%08X  prevCount@wait: %d", l5ProdAddr, gft.prevProdSemThread.load(std::memory_order_relaxed), (sint32)gft.prevProdSemPrevCount.load(std::memory_order_relaxed));
+                ImGui::Text("    Wait: %.2f ms", l5WaitMs);
+                if (l5Sig != 0)
+                {
+                    ImGui::Text("    Signal: %.2f ms (after wait start)  Signal->wake: %.2f ms", PPCTimer_tscToMicroseconds(l5Sig - l5WS) / 1000.0, PPCTimer_tscToMicroseconds(l5WE - l5Sig) / 1000.0);
+                    ImGui::Text("    Signaler: 0x%08X core %u", gft.prevProdSemSignalThread.load(std::memory_order_relaxed), gft.prevProdSemSignalCore.load(std::memory_order_relaxed));
+                }
+                else
+                {
+                    ImGui::Text("    Signal: none-in-window  Signaler: n/a");
+                }
+                ImGui::Text("    Calls/frame: waits %u passes %u signals %u", l5W, l5P, l5S);
+            }
+            // Top semaphores by blocking wait time this frame (up to 4), from the published table.
+            {
+                uint32 topAddr[4] = {0, 0, 0, 0};
+                uint64 topTsc[4]  = {0, 0, 0, 0};
+                unsigned topN[4]  = {0, 0, 0, 0};
+                for (uint32 i = 0; i < GX2::GuestFrameTimingState::kSemSlots; i++)
+                {
+                    const uint32 a = gft.prevSemAddr[i].load(std::memory_order_relaxed);
+                    if (a == 0) continue;
+                    const uint64 t = gft.prevSemWaitTsc[i].load(std::memory_order_relaxed);
+                    const unsigned n = (unsigned)gft.prevSemWaitCount[i].load(std::memory_order_relaxed);
+                    for (uint32 k = 0; k < 4; k++)
+                    {
+                        if (t > topTsc[k])
+                        {
+                            for (uint32 m = 3; m > k; m--) { topTsc[m] = topTsc[m-1]; topAddr[m] = topAddr[m-1]; topN[m] = topN[m-1]; }
+                            topTsc[k] = t; topAddr[k] = a; topN[k] = n;
+                            break;
+                        }
+                    }
+                }
+                const uint32 l5Overflow = gft.prevSemOverflow.load(std::memory_order_relaxed);
+                ImGui::Text("  Layer 5 - top semaphores (wait / count)%s:", l5Overflow ? " [+overflow]" : "");
+                for (uint32 k = 0; k < 4; k++)
+                {
+                    if (topAddr[k] == 0) continue;
+                    ImGui::Text("    0x%08X  %6.2f ms / %u", topAddr[k], PPCTimer_tscToMicroseconds(topTsc[k]) / 1000.0, topN[k]);
+                }
+            }
         }
     }
 

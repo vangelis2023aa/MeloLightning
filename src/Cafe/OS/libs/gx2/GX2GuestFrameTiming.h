@@ -139,6 +139,32 @@ namespace GX2
 		std::atomic<uint64> curProducerMaxWaitTsc{0};
 		std::atomic<uint32> curProducerMaxWaitCaller{0};
 
+		// Layer 5: per-semaphore identity + signal/wake timing for the Semaphore qAndW path. Fixed
+		// 8-slot table keyed by guest semaphore MPTR. Identity (semAddr) and last-signal info persist
+		// across frames (like producerThread); per-frame counters/timing publish+reset like Layer 4.
+		static constexpr uint32 kSemSlots = 8;
+		std::atomic<uint32> semAddr[kSemSlots]{};               // guest MPTR key, 0 = free (persistent)
+		std::atomic<uint64> curSemWaitTsc[kSemSlots]{};         // blocking wait time (main core)
+		std::atomic<uint32> curSemWaitCount[kSemSlots]{};       // blocking waits (main core)
+		std::atomic<uint32> curSemPassCount[kSemSlots]{};       // count>0 non-blocking passes (main core)
+		std::atomic<uint32> curSemSignalCount[kSemSlots]{};     // signals this frame (any core)
+		std::atomic<uint32> semOverflow{0};                     // waits/signals that found no free slot
+		// last-signal identity per slot (persistent across frames; written on any core)
+		std::atomic<uint64> lastSemSignalTsc[kSemSlots]{};
+		std::atomic<uint32> lastSemSignalThread[kSemSlots]{};
+		std::atomic<uint32> lastSemSignalCore[kSemSlots]{};
+		std::atomic<uint32> lastSemSignalPrevCount[kSemSlots]{};
+		std::atomic<uint32> lastSemSignalHadWaiters[kSemSlots]{};
+		// producer's longest semaphore wait this frame (single-writer on the main core)
+		std::atomic<uint32> curProdSemAddr{0};
+		std::atomic<uint32> curProdSemThread{0};
+		std::atomic<uint64> curProdSemWaitStartTsc{0};
+		std::atomic<uint64> curProdSemWaitEndTsc{0};
+		std::atomic<uint32> curProdSemPrevCount{0};
+		std::atomic<uint64> curProdSemSignalTsc{0};             // 0 = no signal landed in the wait window
+		std::atomic<uint32> curProdSemSignalThread{0};
+		std::atomic<uint32> curProdSemSignalCore{0};
+
 		// --- published snapshot of the last COMPLETED guest frame; read by the overlay (Latte thread) ---
 		std::atomic<uint64> prevFrameSpanTsc{0};
 		std::atomic<uint64> prevGpuRetireWaitTsc{0};
@@ -155,6 +181,21 @@ namespace GX2
 		std::atomic<uint32> prevGICallerProducerCount[kGICallerCount]{};
 		std::atomic<uint64> prevProducerMaxWaitTsc{0};
 		std::atomic<uint32> prevProducerMaxWaitCaller{0};
+		// Layer 5 published snapshots (per-semaphore identity + per-frame counters + producer sema wait)
+		std::atomic<uint32> prevSemAddr[kSemSlots]{};
+		std::atomic<uint64> prevSemWaitTsc[kSemSlots]{};
+		std::atomic<uint32> prevSemWaitCount[kSemSlots]{};
+		std::atomic<uint32> prevSemPassCount[kSemSlots]{};
+		std::atomic<uint32> prevSemSignalCount[kSemSlots]{};
+		std::atomic<uint32> prevSemOverflow{0};
+		std::atomic<uint32> prevProdSemAddr{0};
+		std::atomic<uint32> prevProdSemThread{0};
+		std::atomic<uint64> prevProdSemWaitStartTsc{0};
+		std::atomic<uint64> prevProdSemWaitEndTsc{0};
+		std::atomic<uint32> prevProdSemPrevCount{0};
+		std::atomic<uint64> prevProdSemSignalTsc{0};
+		std::atomic<uint32> prevProdSemSignalThread{0};
+		std::atomic<uint32> prevProdSemSignalCore{0};
 		std::atomic<uint32> prevValid{0};
 
 		// Layer 3: handle of the thread that drives GX2SwapScanBuffers on the main core (critical path).
@@ -218,6 +259,92 @@ namespace GX2
 		}
 	}
 
+	// ---- Layer 5: per-semaphore identity + signal/wake timing (diagnostic-only) ----
+	// Lock-free fixed table keyed by guest semaphore MPTR. CAS claim, relaxed atomics, no allocation.
+	// Instruments ONLY the semaphore API (OSWaitSemaphoreInternal / OSSignalSemaphoreInternal), never
+	// the scheduler/wake funnels. Identity + last-signal persist across frames; counters reset at publish.
+	inline sint32 Layer5_SemSlotFindOrClaim(GuestFrameTimingState& s, uint32 semAddr)
+	{
+		for (uint32 i = 0; i < GuestFrameTimingState::kSemSlots; i++)
+			if (s.semAddr[i].load(std::memory_order_relaxed) == semAddr)
+				return (sint32)i;
+		for (uint32 i = 0; i < GuestFrameTimingState::kSemSlots; i++)
+		{
+			uint32 expected = 0;
+			if (s.semAddr[i].compare_exchange_strong(expected, semAddr, std::memory_order_relaxed) || expected == semAddr)
+				return (sint32)i;
+		}
+		return -1;
+	}
+
+	// count>0 fast path (no block). Main-core gated to match the per-frame window.
+	inline void NoteSemaphorePass(uint32 semAddr)
+	{
+		if (coreinit::OSGetCoreId() != (sint32)sGX2MainCoreIndex)
+			return;
+		GuestFrameTimingState& s = GetGuestFrameTiming();
+		const sint32 i = Layer5_SemSlotFindOrClaim(s, semAddr);
+		if (i < 0) { s.semOverflow.fetch_add(1, std::memory_order_relaxed); return; }
+		s.curSemPassCount[i].fetch_add(1, std::memory_order_relaxed);
+	}
+
+	// Blocking wait just returned. [startTsc,endTsc] bracket the queueAndWait. Main-core gated like
+	// the Layer-2/3/4 accumulators. thread is the host OSThread_t* (compared to producerThread like
+	// Layer 3); threadMPTR is the numeric id for display. prevCount is the count when we chose to block.
+	inline void NoteSemaphoreWait(uint32 semAddr, uint64 startTsc, uint64 endTsc, void* thread, uint32 threadMPTR, uint32 prevCount)
+	{
+		if (coreinit::OSGetCoreId() != (sint32)sGX2MainCoreIndex)
+			return;
+		GuestFrameTimingState& s = GetGuestFrameTiming();
+		const sint32 i = Layer5_SemSlotFindOrClaim(s, semAddr);
+		if (i < 0) { s.semOverflow.fetch_add(1, std::memory_order_relaxed); return; }
+		const uint64 dt = endTsc - startTsc;
+		s.curSemWaitTsc[i].fetch_add(dt, std::memory_order_relaxed);
+		s.curSemWaitCount[i].fetch_add(1, std::memory_order_relaxed);
+		if (thread != nullptr && thread == s.producerThread.load(std::memory_order_relaxed))
+		{
+			const uint64 prevDur = s.curProdSemWaitEndTsc.load(std::memory_order_relaxed) - s.curProdSemWaitStartTsc.load(std::memory_order_relaxed);
+			if (dt > prevDur)
+			{
+				s.curProdSemAddr.store(semAddr, std::memory_order_relaxed);
+				s.curProdSemThread.store(threadMPTR, std::memory_order_relaxed);
+				s.curProdSemWaitStartTsc.store(startTsc, std::memory_order_relaxed);
+				s.curProdSemWaitEndTsc.store(endTsc, std::memory_order_relaxed);
+				s.curProdSemPrevCount.store(prevCount, std::memory_order_relaxed);
+				// Match the most recent signal of THIS semaphore if it landed inside the wait window.
+				const uint64 sig = s.lastSemSignalTsc[i].load(std::memory_order_relaxed);
+				if (sig >= startTsc && sig <= endTsc)
+				{
+					s.curProdSemSignalTsc.store(sig, std::memory_order_relaxed);
+					s.curProdSemSignalThread.store(s.lastSemSignalThread[i].load(std::memory_order_relaxed), std::memory_order_relaxed);
+					s.curProdSemSignalCore.store(s.lastSemSignalCore[i].load(std::memory_order_relaxed), std::memory_order_relaxed);
+				}
+				else
+				{
+					s.curProdSemSignalTsc.store(0, std::memory_order_relaxed);
+					s.curProdSemSignalThread.store(0, std::memory_order_relaxed);
+					s.curProdSemSignalCore.store(0, std::memory_order_relaxed);
+				}
+			}
+		}
+	}
+
+	// Signal/post. NOT main-core gated — the signaler is exactly what we want to identify and may run
+	// on any core. Records identity + timestamp just BEFORE the (unchanged) wakeup. Relaxed atomics:
+	// diagnostic only; a signal racing the main-core publish is benign.
+	inline void NoteSemaphoreSignal(uint32 semAddr, uint32 signalerMPTR, uint32 core, uint32 prevCount, uint32 hadWaiters)
+	{
+		GuestFrameTimingState& s = GetGuestFrameTiming();
+		const sint32 i = Layer5_SemSlotFindOrClaim(s, semAddr);
+		if (i < 0) { s.semOverflow.fetch_add(1, std::memory_order_relaxed); return; }
+		s.curSemSignalCount[i].fetch_add(1, std::memory_order_relaxed);
+		s.lastSemSignalTsc[i].store(PPCTimer_getRawTsc(), std::memory_order_relaxed);
+		s.lastSemSignalThread[i].store(signalerMPTR, std::memory_order_relaxed);
+		s.lastSemSignalCore[i].store(core, std::memory_order_relaxed);
+		s.lastSemSignalPrevCount[i].store(prevCount, std::memory_order_relaxed);
+		s.lastSemSignalHadWaiters[i].store(hadWaiters, std::memory_order_relaxed);
+	}
+
 	inline void PublishGuestFrameAtMainCoreSwap()
 	{
 		GuestFrameTimingState& s = GetGuestFrameTiming();
@@ -241,6 +368,24 @@ namespace GX2
 			s.prevGIProducerCount.store(s.curGIProducerCount.load(std::memory_order_relaxed), std::memory_order_relaxed);
 			s.prevProducerMaxWaitTsc.store(s.curProducerMaxWaitTsc.load(std::memory_order_relaxed), std::memory_order_relaxed);
 			s.prevProducerMaxWaitCaller.store(s.curProducerMaxWaitCaller.load(std::memory_order_relaxed), std::memory_order_relaxed);
+			// Layer 5: snapshot per-semaphore identity + per-frame counters + producer sema wait.
+			for (uint32 i = 0; i < GuestFrameTimingState::kSemSlots; i++)
+			{
+				s.prevSemAddr[i].store(s.semAddr[i].load(std::memory_order_relaxed), std::memory_order_relaxed);
+				s.prevSemWaitTsc[i].store(s.curSemWaitTsc[i].load(std::memory_order_relaxed), std::memory_order_relaxed);
+				s.prevSemWaitCount[i].store(s.curSemWaitCount[i].load(std::memory_order_relaxed), std::memory_order_relaxed);
+				s.prevSemPassCount[i].store(s.curSemPassCount[i].load(std::memory_order_relaxed), std::memory_order_relaxed);
+				s.prevSemSignalCount[i].store(s.curSemSignalCount[i].load(std::memory_order_relaxed), std::memory_order_relaxed);
+			}
+			s.prevSemOverflow.store(s.semOverflow.load(std::memory_order_relaxed), std::memory_order_relaxed);
+			s.prevProdSemAddr.store(s.curProdSemAddr.load(std::memory_order_relaxed), std::memory_order_relaxed);
+			s.prevProdSemThread.store(s.curProdSemThread.load(std::memory_order_relaxed), std::memory_order_relaxed);
+			s.prevProdSemWaitStartTsc.store(s.curProdSemWaitStartTsc.load(std::memory_order_relaxed), std::memory_order_relaxed);
+			s.prevProdSemWaitEndTsc.store(s.curProdSemWaitEndTsc.load(std::memory_order_relaxed), std::memory_order_relaxed);
+			s.prevProdSemPrevCount.store(s.curProdSemPrevCount.load(std::memory_order_relaxed), std::memory_order_relaxed);
+			s.prevProdSemSignalTsc.store(s.curProdSemSignalTsc.load(std::memory_order_relaxed), std::memory_order_relaxed);
+			s.prevProdSemSignalThread.store(s.curProdSemSignalThread.load(std::memory_order_relaxed), std::memory_order_relaxed);
+			s.prevProdSemSignalCore.store(s.curProdSemSignalCore.load(std::memory_order_relaxed), std::memory_order_relaxed);
 			s.prevValid.store(1, std::memory_order_relaxed);
 		}
 		s.curGpuRetireWaitTsc.store(0, std::memory_order_relaxed);
@@ -258,6 +403,23 @@ namespace GX2
 		s.curGIProducerCount.store(0, std::memory_order_relaxed);
 		s.curProducerMaxWaitTsc.store(0, std::memory_order_relaxed);
 		s.curProducerMaxWaitCaller.store(0, std::memory_order_relaxed);
+		// Layer 5: reset per-frame counters only; identity (semAddr) and last-signal info persist.
+		for (uint32 i = 0; i < GuestFrameTimingState::kSemSlots; i++)
+		{
+			s.curSemWaitTsc[i].store(0, std::memory_order_relaxed);
+			s.curSemWaitCount[i].store(0, std::memory_order_relaxed);
+			s.curSemPassCount[i].store(0, std::memory_order_relaxed);
+			s.curSemSignalCount[i].store(0, std::memory_order_relaxed);
+		}
+		s.semOverflow.store(0, std::memory_order_relaxed);
+		s.curProdSemAddr.store(0, std::memory_order_relaxed);
+		s.curProdSemThread.store(0, std::memory_order_relaxed);
+		s.curProdSemWaitStartTsc.store(0, std::memory_order_relaxed);
+		s.curProdSemWaitEndTsc.store(0, std::memory_order_relaxed);
+		s.curProdSemPrevCount.store(0, std::memory_order_relaxed);
+		s.curProdSemSignalTsc.store(0, std::memory_order_relaxed);
+		s.curProdSemSignalThread.store(0, std::memory_order_relaxed);
+		s.curProdSemSignalCore.store(0, std::memory_order_relaxed);
 		s.curFrameStartTsc.store(now, std::memory_order_relaxed);
 	}
 }

@@ -399,9 +399,12 @@ namespace coreinit
 			if (prevCount > 0)
 			{
 				semaphore->count = prevCount - 1;
+				GX2::NoteSemaphorePass(MEMPTR<OSSemaphore>(semaphore).GetMPTR()); // Layer 5 TEMP (diagnostic, semaphore-API-level)
 				return prevCount;
 			}
+			const uint64 _l5SemWaitT0 = PPCTimer_getRawTsc(); // Layer 5 TEMP (diagnostic)
 			semaphore->threadQueue.queueAndWait(OSGetCurrentThread(), (uint32)GX2::GuestInternalCaller::Semaphore); // Layer 4 TEMP tag
+			GX2::NoteSemaphoreWait(MEMPTR<OSSemaphore>(semaphore).GetMPTR(), _l5SemWaitT0, PPCTimer_getRawTsc(), (void*)OSGetCurrentThread(), MEMPTR<void>(OSGetCurrentThread()).GetMPTR(), (uint32)prevCount); // Layer 5 TEMP (diagnostic)
 		}
 	}
 
@@ -430,6 +433,9 @@ namespace coreinit
 		cemu_assert_debug(__OSHasSchedulerLock());
 		sint32 prevCount = semaphore->count;
 		semaphore->count = prevCount + 1;
+		// Layer 5 TEMP (diagnostic, semaphore-API-level): record identity/time/signaler BEFORE the
+		// unchanged wakeup. Same guest MPTR as the wait side; wakeup implementation is NOT touched.
+		GX2::NoteSemaphoreSignal(MEMPTR<OSSemaphore>(semaphore).GetMPTR(), MEMPTR<void>(OSGetCurrentThread()).GetMPTR(), (uint32)OSGetCoreId(), (uint32)prevCount, semaphore->threadQueue.isEmpty() ? 0u : 1u);
 		semaphore->threadQueue.wakeupEntireWaitQueue(reschedule);
 		return prevCount;
 	}
