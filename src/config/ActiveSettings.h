@@ -166,6 +166,11 @@ public:
 	// whole-stage arg-buffer re-encode. Read at shader-decompile time (analyzer) and at bind time. OFF =>
 	// support buffer stays inside the argument buffer, byte-identical. See CemuConfig experimental_support_buffer_indirection.
 	[[nodiscard]] static bool ExperimentalSupportBufferIndirection();
+	// GX2: batch the per-word core-index/double-swap write-gather burst in GX2SetPixelShader's input-control
+	// loop into one array emission (resolve the core index once). PM4 bytes + order byte-identical; read once
+	// per GX2SetPixelShader call (no per-word toggle cost). OFF => original per-word path. See CemuConfig
+	// experimental_gx2_writegather_batch.
+	[[nodiscard]] static bool ExperimentalGX2WriteGatherBatch();
 
 	// Experimental MetalFX spatial upscaling (Metal/iOS). Read once by MetalRenderer at construction
 	// and latched; see CemuConfig experimental_metalfx_* flags.

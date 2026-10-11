@@ -149,6 +149,15 @@ class ConfigManager: ObservableObject {
         }
     }
 
+    var experimentalGX2WriteGatherBatch: Binding<Bool> {
+        Binding {
+            self.config.experimentalGX2WriteGatherBatch
+        } set: {
+            self.config.experimentalGX2WriteGatherBatch = $0
+            self.objectWillChange.send()
+        }
+    }
+
     var experimentalSamplerCacheFastPath: Binding<Bool> {
         Binding {
             self.config.experimentalSamplerCacheFastPath

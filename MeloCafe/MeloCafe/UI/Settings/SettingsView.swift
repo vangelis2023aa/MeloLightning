@@ -320,6 +320,13 @@ struct SettingsView: View {
                             .foregroundStyle(.secondary)
                     }
 
+                    VStack(alignment: .leading, spacing: 4) {
+                        Toggle("Batch GX2 Write-Gather Bursts (CPU)", isOn: configManager.experimentalGX2WriteGatherBatch)
+                        Text("CPU only. When the game sets a pixel shader, write its block of input-control registers to the GPU command buffer in one batched copy instead of one word at a time. Each per-word write otherwise re-resolves the current CPU core and byte-swaps twice; batching resolves the core once and copies the identical bytes. The command stream is byte-for-byte identical, so this is safe to leave on; the saving is small and shows mainly in shader-heavy scenes.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
                     if configManager.renderer.wrappedValue == .metal {
                         VStack(alignment: .leading, spacing: 4) {
                             Toggle("Pipeline State Fast-Path", isOn: configManager.experimentalPipelineCacheFastPath)

@@ -127,6 +127,7 @@ typedef NS_ENUM(NSInteger, ObjCPrecompiledShaderOption) {
 @property (nonatomic) BOOL experimentalSkipRedundantResidency;
 @property (nonatomic) BOOL experimentalPpcBlockLinking;
 @property (nonatomic) BOOL experimentalPipelineCacheFastPath;
+@property (nonatomic) BOOL experimentalGX2WriteGatherBatch;
 @property (nonatomic) BOOL experimentalSamplerCacheFastPath;
 @property (nonatomic) BOOL experimentalPassTextureFastPath;
 @property (nonatomic) BOOL experimentalSkipRedundantUpload;

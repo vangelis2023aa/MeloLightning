@@ -541,6 +541,7 @@ struct CemuConfig
 	ConfigValue<bool> experimental_skip_redundant_residency{ false };// Metal: skip redundant per-encoder useResource() residency
 	ConfigValue<bool> experimental_ppc_block_linking{ false };       // PPC interpreter: link basic blocks to skip per-block hash lookup
 	ConfigValue<bool> experimental_pipeline_cache_fast_path{ false };// Metal: per-draw-pass pipeline + depth-stencil hash memoization
+	ConfigValue<bool> experimental_gx2_writegather_batch{ false };   // GX2: in GX2SetPixelShader's input-control burst, emit the contiguous input-register words with one array write (resolve the core index once) instead of one per-word submit that re-resolves the TLS core index + double-swaps each word. PM4 bytes + order are byte-identical; OFF = original per-word path
 	ConfigValue<bool> experimental_sampler_cache_fast_path{ false }; // Metal: per-draw-pass sampler-state hash memoization
 	ConfigValue<bool> experimental_pass_texture_fastpath{ false };   // Metal: per-draw-pass texture-binding fast path - reuse the MTL::Texture* resolved for a (stage,unit) earlier in the same draw pass instead of re-running the null-texture selection + swizzle-view resolve each draw
 	ConfigValue<bool> experimental_skip_redundant_upload{ false };   // Metal: skip a texture-slice staging-copy + blit when the identical bytes already reside in that subresource (per-subresource content fingerprint; only while the texture has never been GPU-written)

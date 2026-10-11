@@ -253,6 +253,11 @@ bool ActiveSettings::ExperimentalSupportBufferIndirection()
 	return GetConfig().experimental_support_buffer_indirection;
 }
 
+bool ActiveSettings::ExperimentalGX2WriteGatherBatch()
+{
+	return GetConfig().experimental_gx2_writegather_batch;
+}
+
 bool ActiveSettings::ExperimentalMetalFXEnable()
 {
 	return GetConfig().experimental_metalfx_enable;

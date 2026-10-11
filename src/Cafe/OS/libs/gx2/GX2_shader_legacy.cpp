@@ -7,6 +7,7 @@
 
 #include "GX2.h"
 #include "GX2_Shader.h"
+#include "config/ActiveSettings.h" // experimental_gx2_writegather_batch toggle (default OFF)
 
 void gx2Export_GX2SetPixelShader(PPCInterpreter_t* hCPU)
 {
@@ -51,10 +52,24 @@ void gx2Export_GX2SetPixelShader(PPCInterpreter_t* hCPU)
 	// setup pixel shader extended inputs control
 	gx2WriteGather_submitU32AsBE(pm4HeaderType3(IT_SET_CONTEXT_REG, 1+numInputs));
 	gx2WriteGather_submitU32AsBE(mmSPI_PS_INPUT_CNTL_0-0xA000);
-	for(uint32 i=0; i<numInputs; i++)
+	// Experimental "Batch GX2 Write-Gather Bursts" (default OFF): the input-control words are a contiguous
+	// run pixelShader->regs[5 .. 5+numInputs). The original loop writes submitU32AsBE(_swapEndianU32(regs[5+i]))
+	// = regs[5+i]'s raw (guest big-endian) bytes, so one array copy of regs[5..] is byte-for-byte identical
+	// (same bytes, same order) while resolving the TLS core index ONCE instead of once per word and skipping
+	// the per-word double endian-swap. The core index is stable across this burst (single HLE export, space
+	// already reserved by GX2ReserveCmdSpace above, no yield), exactly as the existing variadic submit assumes.
+	// Toggle is read once here (no per-word cost); OFF path is the original loop, unchanged.
+	if (ActiveSettings::ExperimentalGX2WriteGatherBatch())
 	{
-		uint32 inputData = _swapEndianU32(pixelShader->regs[5+i]);
-		gx2WriteGather_submitU32AsBE(inputData);
+		gx2WriteGather_submitU32AsLEArray(&pixelShader->regs[5], numInputs);
+	}
+	else
+	{
+		for(uint32 i=0; i<numInputs; i++)
+		{
+			uint32 inputData = _swapEndianU32(pixelShader->regs[5+i]);
+			gx2WriteGather_submitU32AsBE(inputData);
+		}
 	}
 
 	gx2WriteGather_submit(

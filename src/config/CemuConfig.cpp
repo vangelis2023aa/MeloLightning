@@ -296,6 +296,7 @@ XMLConfigParser CemuConfig::Load(XMLConfigParser& parser)
 	experimental_skip_redundant_residency = experimental.get("SkipRedundantResidency", false);
 	experimental_ppc_block_linking = experimental.get("PpcBlockLinking", false);
 	experimental_pipeline_cache_fast_path = experimental.get("PipelineCacheFastPath", false);
+	experimental_gx2_writegather_batch = experimental.get("GX2WriteGatherBatch", false);
 	experimental_sampler_cache_fast_path = experimental.get("SamplerCacheFastPath", false);
 	experimental_pass_texture_fastpath = experimental.get("PassTextureFastPath", false);
 	experimental_skip_redundant_upload = experimental.get("SkipRedundantUpload", false);
@@ -508,6 +509,7 @@ XMLConfigParser CemuConfig::Save(XMLConfigParser& parser)
 	experimental.set("SkipRedundantResidency", experimental_skip_redundant_residency.GetValue());
 	experimental.set("PpcBlockLinking", experimental_ppc_block_linking.GetValue());
 	experimental.set("PipelineCacheFastPath", experimental_pipeline_cache_fast_path.GetValue());
+	experimental.set("GX2WriteGatherBatch", experimental_gx2_writegather_batch.GetValue());
 	experimental.set("SamplerCacheFastPath", experimental_sampler_cache_fast_path.GetValue());
 	experimental.set("PassTextureFastPath", experimental_pass_texture_fastpath.GetValue());
 	experimental.set("SkipRedundantUpload", experimental_skip_redundant_upload.GetValue());
