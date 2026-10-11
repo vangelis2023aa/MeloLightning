@@ -180,6 +180,10 @@ public:
 	// is a valid AArch64 bitmask immediate; otherwise fall back to the original mov-to-scratch + register
 	// op. Read at block compile time. OFF => original mov+op codegen. See CemuConfig experimental_aarch64_logical_imm.
 	[[nodiscard]] static bool ExperimentalAArch64LogicalImm();
+	// AArch64 JIT: in the B_TO_REG computed-branch macro, collapse the zero-base mov + shifted-add of the
+	// jump-table index into a single lsl (guarded by offsetof(jump table)==0). Read at block compile time.
+	// OFF or non-zero offset => original mov+add codegen. See CemuConfig experimental_aarch64_fast_branch_reg.
+	[[nodiscard]] static bool ExperimentalAArch64FastBranchReg();
 
 	// Experimental MetalFX spatial upscaling (Metal/iOS). Read once by MetalRenderer at construction
 	// and latched; see CemuConfig experimental_metalfx_* flags.

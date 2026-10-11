@@ -328,6 +328,13 @@ struct SettingsView: View {
                     }
 
                     VStack(alignment: .leading, spacing: 4) {
+                        Toggle("Fast Register Branch (JIT)", isOn: configManager.experimentalAArch64FastBranchReg)
+                        Text("CPU only. In the ARM64 recompiler's indirect-branch path (used for computed jumps and returns), fold two setup instructions that compute the jump-table slot into one shift. The target address is identical. Takes effect on code compiled after you change it (fully after a restart). Turn it off if a game misbehaves.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    VStack(alignment: .leading, spacing: 4) {
                         Toggle("Logical Immediate Encoding (JIT)", isOn: configManager.experimentalAArch64LogicalImm)
                         Text("CPU only. In the ARM64 recompiler, encode AND/OR/XOR-with-constant as a single instruction when the constant fits ARM64's bitmask-immediate form, instead of loading the constant into a scratch register first. Results are identical; constants that don't fit, and this option when off, use the original two-instruction path. Takes effect on code compiled after you change it (fully after a restart).")
                             .font(.caption)

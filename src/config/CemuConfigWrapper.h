@@ -130,6 +130,7 @@ typedef NS_ENUM(NSInteger, ObjCPrecompiledShaderOption) {
 @property (nonatomic) BOOL experimentalGX2WriteGatherBatch;
 @property (nonatomic) BOOL experimentalAArch64FastMem;
 @property (nonatomic) BOOL experimentalAArch64LogicalImm;
+@property (nonatomic) BOOL experimentalAArch64FastBranchReg;
 @property (nonatomic) BOOL experimentalSamplerCacheFastPath;
 @property (nonatomic) BOOL experimentalPassTextureFastPath;
 @property (nonatomic) BOOL experimentalSkipRedundantUpload;

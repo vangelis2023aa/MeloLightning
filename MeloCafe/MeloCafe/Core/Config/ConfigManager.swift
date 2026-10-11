@@ -176,6 +176,15 @@ class ConfigManager: ObservableObject {
         }
     }
 
+    var experimentalAArch64FastBranchReg: Binding<Bool> {
+        Binding {
+            self.config.experimentalAArch64FastBranchReg
+        } set: {
+            self.config.experimentalAArch64FastBranchReg = $0
+            self.objectWillChange.send()
+        }
+    }
+
     var experimentalSamplerCacheFastPath: Binding<Bool> {
         Binding {
             self.config.experimentalSamplerCacheFastPath

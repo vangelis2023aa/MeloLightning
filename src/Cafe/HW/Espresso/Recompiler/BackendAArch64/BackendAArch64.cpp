@@ -1016,8 +1016,22 @@ bool AArch64GenContext_t::macro(IMLInstruction* imlInstruction)
 	{
 		WReg branchDstReg = gpReg<WReg>(imlInstruction->op_macro.paramReg);
 
-		mov(TEMP_GPR1.WReg, offsetof(PPCRecompilerInstanceData_t, ppcRecompilerDirectJumpTable));
-		add(TEMP_GPR1.WReg, TEMP_GPR1.WReg, branchDstReg, ShMod::LSL, 1);
+		// Experimental "Fast Register Branch" (default OFF): the jump table is the first member of
+		// PPCRecompilerInstanceData_t, so its offset is 0 and `mov TEMP,#0; add TEMP,TEMP,reg,lsl #1`
+		// computes exactly reg<<1 (32-bit, zero-extended) -- identical to a single `lsl TEMP,reg,#1`.
+		// Guarded by offsetof==0 so a struct reorder transparently falls back to the original mov+add.
+		// branchDstReg (x0..x24) is read before any clobber; the ldr below consumes TEMP via UXTW exactly
+		// as before; LR is still set from branchDstReg afterwards. Read once per emit at compile time.
+		constexpr size_t l_jumpTableOffset = offsetof(PPCRecompilerInstanceData_t, ppcRecompilerDirectJumpTable);
+		if (ActiveSettings::ExperimentalAArch64FastBranchReg() && l_jumpTableOffset == 0)
+		{
+			lsl(TEMP_GPR1.WReg, branchDstReg, 1);
+		}
+		else
+		{
+			mov(TEMP_GPR1.WReg, l_jumpTableOffset);
+			add(TEMP_GPR1.WReg, TEMP_GPR1.WReg, branchDstReg, ShMod::LSL, 1);
+		}
 		ldr(TEMP_GPR1.XReg, AdrExt(PPC_REC_INSTANCE_REG, TEMP_GPR1.WReg, ExtMod::UXTW));
 		mov(LR.WReg, branchDstReg);
 		br(TEMP_GPR1.XReg);

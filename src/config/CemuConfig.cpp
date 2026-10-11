@@ -299,6 +299,7 @@ XMLConfigParser CemuConfig::Load(XMLConfigParser& parser)
 	experimental_gx2_writegather_batch = experimental.get("GX2WriteGatherBatch", false);
 	experimental_aarch64_fastmem = experimental.get("AArch64FastMem", false);
 	experimental_aarch64_logical_imm = experimental.get("AArch64LogicalImm", false);
+	experimental_aarch64_fast_branch_reg = experimental.get("AArch64FastBranchReg", false);
 	experimental_sampler_cache_fast_path = experimental.get("SamplerCacheFastPath", false);
 	experimental_pass_texture_fastpath = experimental.get("PassTextureFastPath", false);
 	experimental_skip_redundant_upload = experimental.get("SkipRedundantUpload", false);
@@ -514,6 +515,7 @@ XMLConfigParser CemuConfig::Save(XMLConfigParser& parser)
 	experimental.set("GX2WriteGatherBatch", experimental_gx2_writegather_batch.GetValue());
 	experimental.set("AArch64FastMem", experimental_aarch64_fastmem.GetValue());
 	experimental.set("AArch64LogicalImm", experimental_aarch64_logical_imm.GetValue());
+	experimental.set("AArch64FastBranchReg", experimental_aarch64_fast_branch_reg.GetValue());
 	experimental.set("SamplerCacheFastPath", experimental_sampler_cache_fast_path.GetValue());
 	experimental.set("PassTextureFastPath", experimental_pass_texture_fastpath.GetValue());
 	experimental.set("SkipRedundantUpload", experimental_skip_redundant_upload.GetValue());
