@@ -176,6 +176,10 @@ public:
 	// indexed) for the provably-common off==0 access classes. Host EA byte-identical; read at block
 	// compile time. OFF => original add-immediate codegen. See CemuConfig experimental_aarch64_fastmem.
 	[[nodiscard]] static bool ExperimentalAArch64FastMem();
+	// AArch64 JIT: emit immediate AND/OR/XOR as a single logical-immediate instruction when the constant
+	// is a valid AArch64 bitmask immediate; otherwise fall back to the original mov-to-scratch + register
+	// op. Read at block compile time. OFF => original mov+op codegen. See CemuConfig experimental_aarch64_logical_imm.
+	[[nodiscard]] static bool ExperimentalAArch64LogicalImm();
 
 	// Experimental MetalFX spatial upscaling (Metal/iOS). Read once by MetalRenderer at construction
 	// and latched; see CemuConfig experimental_metalfx_* flags.

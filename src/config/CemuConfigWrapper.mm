@@ -171,6 +171,9 @@ static CPUMode toCPUMode(ObjCCPUMode mode) {
 - (BOOL)experimentalAArch64FastMem         { return GetConfig().experimental_aarch64_fastmem.GetValue(); }
 - (void)setExperimentalAArch64FastMem:(BOOL)v { GetConfig().experimental_aarch64_fastmem = v; autoSave(); }
 
+- (BOOL)experimentalAArch64LogicalImm      { return GetConfig().experimental_aarch64_logical_imm.GetValue(); }
+- (void)setExperimentalAArch64LogicalImm:(BOOL)v { GetConfig().experimental_aarch64_logical_imm = v; autoSave(); }
+
 - (BOOL)experimentalSamplerCacheFastPath   { return GetConfig().experimental_sampler_cache_fast_path.GetValue(); }
 - (void)setExperimentalSamplerCacheFastPath:(BOOL)v { GetConfig().experimental_sampler_cache_fast_path = v; autoSave(); }
 - (BOOL)experimentalPassTextureFastPath    { return GetConfig().experimental_pass_texture_fastpath.GetValue(); }

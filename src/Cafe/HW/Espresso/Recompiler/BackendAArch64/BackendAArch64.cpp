@@ -705,6 +705,12 @@ bool AArch64GenContext_t::r_r_s32(IMLInstruction* imlInstruction)
 	WReg regA = gpReg<WReg>(imlInstruction->op_r_r_s32.regA);
 	sint32 immS32 = imlInstruction->op_r_r_s32.immS32;
 
+	// Experimental "Logical Immediate Encoding" (default OFF): read once per r_r_s32 compile (not per
+	// executed guest instruction). When ON, immediate AND/OR/XOR use and_imm/orr_imm/eor_imm, which emit a
+	// single logical-immediate op for a valid AArch64 bitmask immediate and otherwise fall back to the exact
+	// original mov-to-scratch + register op. OFF => original mov+op path, byte-identical.
+	const bool logicalImmFastPath = ActiveSettings::ExperimentalAArch64LogicalImm();
+
 	if (imlInstruction->operation == PPCREC_IML_OP_ADD)
 	{
 		add_imm(regR, regA, immS32, TEMP_GPR1.WReg);
@@ -715,18 +721,39 @@ bool AArch64GenContext_t::r_r_s32(IMLInstruction* imlInstruction)
 	}
 	else if (imlInstruction->operation == PPCREC_IML_OP_AND)
 	{
-		mov(TEMP_GPR1.WReg, immS32);
-		and_(regR, regA, TEMP_GPR1.WReg);
+		if (logicalImmFastPath)
+		{
+			and_imm(regR, regA, (uint32)immS32, TEMP_GPR1.WReg);
+		}
+		else
+		{
+			mov(TEMP_GPR1.WReg, immS32);
+			and_(regR, regA, TEMP_GPR1.WReg);
+		}
 	}
 	else if (imlInstruction->operation == PPCREC_IML_OP_OR)
 	{
-		mov(TEMP_GPR1.WReg, immS32);
-		orr(regR, regA, TEMP_GPR1.WReg);
+		if (logicalImmFastPath)
+		{
+			orr_imm(regR, regA, (uint32)immS32, TEMP_GPR1.WReg);
+		}
+		else
+		{
+			mov(TEMP_GPR1.WReg, immS32);
+			orr(regR, regA, TEMP_GPR1.WReg);
+		}
 	}
 	else if (imlInstruction->operation == PPCREC_IML_OP_XOR)
 	{
-		mov(TEMP_GPR1.WReg, immS32);
-		eor(regR, regA, TEMP_GPR1.WReg);
+		if (logicalImmFastPath)
+		{
+			eor_imm(regR, regA, (uint32)immS32, TEMP_GPR1.WReg);
+		}
+		else
+		{
+			mov(TEMP_GPR1.WReg, immS32);
+			eor(regR, regA, TEMP_GPR1.WReg);
+		}
 	}
 	else if (imlInstruction->operation == PPCREC_IML_OP_MULTIPLY_SIGNED)
 	{

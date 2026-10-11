@@ -263,6 +263,11 @@ bool ActiveSettings::ExperimentalAArch64FastMem()
 	return GetConfig().experimental_aarch64_fastmem;
 }
 
+bool ActiveSettings::ExperimentalAArch64LogicalImm()
+{
+	return GetConfig().experimental_aarch64_logical_imm;
+}
+
 bool ActiveSettings::ExperimentalMetalFXEnable()
 {
 	return GetConfig().experimental_metalfx_enable;

@@ -328,6 +328,13 @@ struct SettingsView: View {
                     }
 
                     VStack(alignment: .leading, spacing: 4) {
+                        Toggle("Logical Immediate Encoding (JIT)", isOn: configManager.experimentalAArch64LogicalImm)
+                        Text("CPU only. In the ARM64 recompiler, encode AND/OR/XOR-with-constant as a single instruction when the constant fits ARM64's bitmask-immediate form, instead of loading the constant into a scratch register first. Results are identical; constants that don't fit, and this option when off, use the original two-instruction path. Takes effect on code compiled after you change it (fully after a restart).")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    VStack(alignment: .leading, spacing: 4) {
                         Toggle("Batch GX2 Write-Gather Bursts (CPU)", isOn: configManager.experimentalGX2WriteGatherBatch)
                         Text("CPU only. When the game sets a pixel shader, write its block of input-control registers to the GPU command buffer in one batched copy instead of one word at a time. Each per-word write otherwise re-resolves the current CPU core and byte-swaps twice; batching resolves the core once and copies the identical bytes. The command stream is byte-for-byte identical, so this is safe to leave on; the saving is small and shows mainly in shader-heavy scenes.")
                             .font(.caption)
