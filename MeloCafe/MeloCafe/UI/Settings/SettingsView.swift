@@ -321,6 +321,13 @@ struct SettingsView: View {
                     }
 
                     VStack(alignment: .leading, spacing: 4) {
+                        Toggle("Fast Memory Addressing (JIT)", isOn: configManager.experimentalAArch64FastMem)
+                        Text("CPU only. In the ARM64 recompiler, drop a redundant address-add the JIT emits before most guest memory loads and stores, feeding the base register straight into the load/store instruction instead. The computed address is identical, so results are unchanged; this just removes one host instruction from a very common operation, which can lower CPU load and heat. Takes effect on code compiled after you change it (fully after a restart). If a game misbehaves after enabling it, turn it off.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    VStack(alignment: .leading, spacing: 4) {
                         Toggle("Batch GX2 Write-Gather Bursts (CPU)", isOn: configManager.experimentalGX2WriteGatherBatch)
                         Text("CPU only. When the game sets a pixel shader, write its block of input-control registers to the GPU command buffer in one batched copy instead of one word at a time. Each per-word write otherwise re-resolves the current CPU core and byte-swaps twice; batching resolves the core once and copies the identical bytes. The command stream is byte-for-byte identical, so this is safe to leave on; the saving is small and shows mainly in shader-heavy scenes.")
                             .font(.caption)

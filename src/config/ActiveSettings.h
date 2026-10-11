@@ -171,6 +171,11 @@ public:
 	// per GX2SetPixelShader call (no per-word toggle cost). OFF => original per-word path. See CemuConfig
 	// experimental_gx2_writegather_batch.
 	[[nodiscard]] static bool ExperimentalGX2WriteGatherBatch();
+	// AArch64 JIT: skip the redundant zero-displacement effective-address `add` in the recompiler's
+	// load/store emit (feed the base reg straight into the UXTW addressing mode, or a single add when
+	// indexed) for the provably-common off==0 access classes. Host EA byte-identical; read at block
+	// compile time. OFF => original add-immediate codegen. See CemuConfig experimental_aarch64_fastmem.
+	[[nodiscard]] static bool ExperimentalAArch64FastMem();
 
 	// Experimental MetalFX spatial upscaling (Metal/iOS). Read once by MetalRenderer at construction
 	// and latched; see CemuConfig experimental_metalfx_* flags.

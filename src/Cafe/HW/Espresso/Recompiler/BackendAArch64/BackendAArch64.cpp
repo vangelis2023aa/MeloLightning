@@ -13,6 +13,7 @@
 #include <unordered_set>
 
 #include "../PPCRecompiler.h"
+#include "config/ActiveSettings.h" // experimental_aarch64_fastmem toggle (default OFF; read at block compile time)
 #include "Common/precompiled.h"
 #include "Common/cpu_features.h"
 #include "HW/Espresso/Interpreter/PPCInterpreterInternal.h"
@@ -1108,11 +1109,30 @@ bool AArch64GenContext_t::load(IMLInstruction* imlInstruction, bool indexed)
 	WReg memReg = gpReg<WReg>(imlInstruction->op_storeLoad.registerMem);
 	WReg dataReg = gpReg<WReg>(imlInstruction->op_storeLoad.registerData);
 
-	add_imm(TEMP_GPR1.WReg, memReg, memOffset, TEMP_GPR1.WReg);
-	if (indexed)
-		add(TEMP_GPR1.WReg, TEMP_GPR1.WReg, gpReg<WReg>(imlInstruction->op_storeLoad.registerMem2));
+	// Experimental "Fast Memory Addressing" (default OFF): add_imm below always emits a real host
+	// instruction, even for memOffset==0 (xbyak add_imm does not fold the #0). For the provably-common
+	// zero-displacement classes (all indexed, all update-form, all rA==0, plain lwz with d==0) feed the
+	// base register straight into the UXTW addressing mode (or a single add when indexed), saving one
+	// host instruction per access. UXTW uses only bits[31:0] zero-extended, so the host effective address
+	// is byte-identical to the add_imm(TEMP,memReg,0)[+add] chain. OFF or memOffset!=0 => original codegen.
+	WReg eaReg = memReg;
+	if (ActiveSettings::ExperimentalAArch64FastMem() && memOffset == 0)
+	{
+		if (indexed)
+		{
+			add(TEMP_GPR1.WReg, memReg, gpReg<WReg>(imlInstruction->op_storeLoad.registerMem2));
+			eaReg = TEMP_GPR1.WReg;
+		}
+	}
+	else
+	{
+		add_imm(TEMP_GPR1.WReg, memReg, memOffset, TEMP_GPR1.WReg);
+		if (indexed)
+			add(TEMP_GPR1.WReg, TEMP_GPR1.WReg, gpReg<WReg>(imlInstruction->op_storeLoad.registerMem2));
+		eaReg = TEMP_GPR1.WReg;
+	}
 
-	auto adr = AdrExt(MEM_BASE_REG, TEMP_GPR1.WReg, ExtMod::UXTW);
+	auto adr = AdrExt(MEM_BASE_REG, eaReg, ExtMod::UXTW);
 	if (imlInstruction->op_storeLoad.copyWidth == 32)
 	{
 		ldr(dataReg, adr);
@@ -1164,10 +1184,26 @@ bool AArch64GenContext_t::store(IMLInstruction* imlInstruction, bool indexed)
 	sint32 memOffset = imlInstruction->op_storeLoad.immS32;
 	bool swapEndian = imlInstruction->op_storeLoad.flags2.swapEndian;
 
-	add_imm(TEMP_GPR1.WReg, memReg, memOffset, TEMP_GPR1.WReg);
-	if (indexed)
-		add(TEMP_GPR1.WReg, TEMP_GPR1.WReg, gpReg<WReg>(imlInstruction->op_storeLoad.registerMem2));
-	AdrExt adr = AdrExt(MEM_BASE_REG, TEMP_GPR1.WReg, ExtMod::UXTW);
+	// Experimental "Fast Memory Addressing" (default OFF): see load() above. Skip the redundant
+	// zero-displacement `add` and feed the base register (or a single indexed add) straight into the
+	// UXTW addressing mode. Host effective address byte-identical; OFF or memOffset!=0 => original codegen.
+	WReg eaReg = memReg;
+	if (ActiveSettings::ExperimentalAArch64FastMem() && memOffset == 0)
+	{
+		if (indexed)
+		{
+			add(TEMP_GPR1.WReg, memReg, gpReg<WReg>(imlInstruction->op_storeLoad.registerMem2));
+			eaReg = TEMP_GPR1.WReg;
+		}
+	}
+	else
+	{
+		add_imm(TEMP_GPR1.WReg, memReg, memOffset, TEMP_GPR1.WReg);
+		if (indexed)
+			add(TEMP_GPR1.WReg, TEMP_GPR1.WReg, gpReg<WReg>(imlInstruction->op_storeLoad.registerMem2));
+		eaReg = TEMP_GPR1.WReg;
+	}
+	AdrExt adr = AdrExt(MEM_BASE_REG, eaReg, ExtMod::UXTW);
 	if (imlInstruction->op_storeLoad.copyWidth == 32)
 	{
 		if (swapEndian)

@@ -158,6 +158,15 @@ class ConfigManager: ObservableObject {
         }
     }
 
+    var experimentalAArch64FastMem: Binding<Bool> {
+        Binding {
+            self.config.experimentalAArch64FastMem
+        } set: {
+            self.config.experimentalAArch64FastMem = $0
+            self.objectWillChange.send()
+        }
+    }
+
     var experimentalSamplerCacheFastPath: Binding<Bool> {
         Binding {
             self.config.experimentalSamplerCacheFastPath

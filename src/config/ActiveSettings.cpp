@@ -258,6 +258,11 @@ bool ActiveSettings::ExperimentalGX2WriteGatherBatch()
 	return GetConfig().experimental_gx2_writegather_batch;
 }
 
+bool ActiveSettings::ExperimentalAArch64FastMem()
+{
+	return GetConfig().experimental_aarch64_fastmem;
+}
+
 bool ActiveSettings::ExperimentalMetalFXEnable()
 {
 	return GetConfig().experimental_metalfx_enable;
