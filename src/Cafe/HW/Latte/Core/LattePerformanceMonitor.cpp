@@ -23,6 +23,9 @@ void LattePerformanceMonitor_frameEnd()
 	performanceMonitor.cpuTime_dcBindStage.frameFinished();
 	performanceMonitor.cpuTime_dcArgEncode.frameFinished();
 	performanceMonitor.cpuTime_dcResidency.frameFinished();
+	performanceMonitor.cpuTime_dcBindTex.frameFinished();
+	performanceMonitor.cpuTime_dcBindSupport.frameFinished();
+	performanceMonitor.cpuTime_dcBindUniform.frameFinished();
 	performanceMonitor.cpuTime_dcDrawEmit.frameFinished();
 
 	performanceMonitor.gpuTime_dcStageTextures.frameFinished();

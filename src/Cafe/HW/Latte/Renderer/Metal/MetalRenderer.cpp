@@ -1054,6 +1054,9 @@ void MetalRenderer::AppendOverlayDebugInfo()
         const double drawEmitMs  = PPCTimer_tscToMicroseconds(performanceMonitor.cpuTime_dcDrawEmit.getPreviousFrameValue()) / 1000.0;
         double bindRemainderMs = bindStageMs - argEncodeMs - residencyMs; // support asm + snapshot + uniform loop + texture resolve
         if (bindRemainderMs < 0.0) bindRemainderMs = 0.0;
+        const double bindTexMs     = PPCTimer_tscToMicroseconds(performanceMonitor.cpuTime_dcBindTex.getPreviousFrameValue()) / 1000.0;
+        const double bindSupportMs = PPCTimer_tscToMicroseconds(performanceMonitor.cpuTime_dcBindSupport.getPreviousFrameValue()) / 1000.0;
+        const double bindUniformMs = PPCTimer_tscToMicroseconds(performanceMonitor.cpuTime_dcBindUniform.getPreviousFrameValue()) / 1000.0;
         const double dcAccountedMs = beginSeqMs + dcIndexMs + bufSyncMs + pipelineMs + bindStageMs + drawEmitMs;
         ImGui::Text("  [submit split - overlay on]");
         ImGui::Text("  beginSequence (per pass)   %.2f ms", beginSeqMs);
@@ -1064,6 +1067,9 @@ void MetalRenderer::AppendOverlayDebugInfo()
         ImGui::Text("    - arg-buffer encode      %.2f ms", argEncodeMs);
         ImGui::Text("    - residency declare      %.2f ms", residencyMs);
         ImGui::Text("    - support/uniform/tex    %.2f ms", bindRemainderMs);
+        ImGui::Text("        . texture/sampler    %.2f ms", bindTexMs);
+        ImGui::Text("        . support buffer     %.2f ms", bindSupportMs);
+        ImGui::Text("        . uniform/storage    %.2f ms", bindUniformMs);
         ImGui::Text("  draw emit                  %.2f ms", drawEmitMs);
         ImGui::Text("  accounted sum              %.2f ms", dcAccountedMs);
     }
@@ -3504,7 +3510,12 @@ bool MetalRenderer::BindStageResources(MTL::RenderCommandEncoder* renderCommandE
         default:
             UNREACHABLE;
     }
-    
+
+    // Diagnostic-only sub-split of the BindStage "support/uniform/tex" remainder (behavior-neutral; zero cost
+    // while the debug overlay is hidden). Begin/end brackets rather than RAII so the three sequential sections
+    // read cleanly; the rare shader-error early-returns below simply drop that one sample (no corruption).
+    if (m_captureCpuStageTimings) performanceMonitor.cpuTime_dcBindTex.beginMeasuring();
+
     // Experimental per-draw-pass sampler fast-path toggle (sampled once per stage; the only OFF-path
     // cost is this atomic bool read). See MetalSamplerCache::GetPassSampler for the correctness proof.
     const bool samplerFastPathOn = ActiveSettings::ExperimentalSamplerCacheFastPath();
@@ -3708,8 +3719,10 @@ bool MetalRenderer::BindStageResources(MTL::RenderCommandEncoder* renderCommandE
         m_argTexBindEpoch[mtlShaderType] = m_encoderEpoch;
     }
     } // end if (runBindLoop)
+    if (m_captureCpuStageTimings) performanceMonitor.cpuTime_dcBindTex.endMeasuring();
 
     // Support buffer
+    if (m_captureCpuStageTimings) performanceMonitor.cpuTime_dcBindSupport.beginMeasuring();
     auto GET_UNIFORM_DATA_PTR = [&](size_t index) { return supportBufferData + (index / 4); };
     
     sint32 shaderAluConst;
@@ -3828,8 +3841,10 @@ bool MetalRenderer::BindStageResources(MTL::RenderCommandEncoder* renderCommandE
                 m_performanceMonitor.m_supportIndirectionDraws++;
         }
     }
-    
+    if (m_captureCpuStageTimings) performanceMonitor.cpuTime_dcBindSupport.endMeasuring();
+
     // Uniform buffers
+    if (m_captureCpuStageTimings) performanceMonitor.cpuTime_dcBindUniform.beginMeasuring();
     for (sint32 i = 0; i < LATTE_NUM_MAX_UNIFORM_BUFFERS; i++)
     {
         if (shader->resourceMapping.uniformBuffersBindingPoint[i] >= 0)
@@ -3879,7 +3894,8 @@ bool MetalRenderer::BindStageResources(MTL::RenderCommandEncoder* renderCommandE
         else
             SetBuffer(renderCommandEncoder, mtlShaderType, xfbRingBuffer, 0, shader->resourceMapping.tfStorageBindingPoint);
     }
-    
+    if (m_captureCpuStageTimings) performanceMonitor.cpuTime_dcBindUniform.endMeasuring();
+
     if (argumentEncoder && shader->shaderType == LatteConst::ShaderType::Vertex)
     {
         const LatteFetchShader* fetchShader = LatteSHRC_GetActiveFetchShader();

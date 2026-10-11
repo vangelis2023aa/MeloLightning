@@ -117,6 +117,11 @@ typedef struct
 	LattePerfStatTimer cpuTime_dcBindStage;  // BindStageResources total (all stages) - superset of the two below
 	LattePerfStatTimer cpuTime_dcArgEncode;  // GetCachedArgumentBuffer (arg-buffer encode storm) - subset of BindStage
 	LattePerfStatTimer cpuTime_dcResidency;  // DeclareResidency probes + useResource - subset of BindStage
+	// Finer BindStageResources decomposition of the "support/uniform/tex" remainder (bindStage - argEncode -
+	// residency), to attribute the direct-binding cost. Subsets of BindStage; sum with argEncode+residency.
+	LattePerfStatTimer cpuTime_dcBindTex;     // texture + sampler resolve/bind loop (skipped by binding_dirty_masks)
+	LattePerfStatTimer cpuTime_dcBindSupport; // support-buffer gather + snapshot/upload + bind
+	LattePerfStatTimer cpuTime_dcBindUniform; // uniform-buffer + storage + vertex/index resolve/bind
 	LattePerfStatTimer cpuTime_dcDrawEmit;   // draw call emission (drawPrimitives/drawIndexed/drawMeshThreadgroups)
 
 	LattePerfStatTimer gpuTime_dcStageTextures; // drawcall texture/mrt setup
