@@ -404,7 +404,13 @@ namespace coreinit
 			}
 			const uint64 _l5SemWaitT0 = PPCTimer_getRawTsc(); // Layer 5 TEMP (diagnostic)
 			semaphore->threadQueue.queueAndWait(OSGetCurrentThread(), (uint32)GX2::GuestInternalCaller::Semaphore); // Layer 4 TEMP tag
-			GX2::NoteSemaphoreWait(MEMPTR<OSSemaphore>(semaphore).GetMPTR(), _l5SemWaitT0, PPCTimer_getRawTsc(), (void*)OSGetCurrentThread(), MEMPTR<void>(OSGetCurrentThread()).GetMPTR(), (uint32)prevCount); // Layer 5 TEMP (diagnostic)
+			// Layer 5b TEMP (diagnostic, register reads only): the guest call site of the waiter. IP is the
+			// HLE call instruction; LR is the guest return address into the calling function. Guarded against
+			// a null current instance exactly like the signal side (host-thread callers). 0 => unavailable.
+			PPCInterpreter_t* _l5WaitCPU = PPCInterpreter_getCurrentInstance();
+			const uint32 _l5WaitIP = _l5WaitCPU ? _l5WaitCPU->instructionPointer : 0u;
+			const uint32 _l5WaitLR = _l5WaitCPU ? _l5WaitCPU->spr.LR : 0u;
+			GX2::NoteSemaphoreWait(MEMPTR<OSSemaphore>(semaphore).GetMPTR(), _l5SemWaitT0, PPCTimer_getRawTsc(), (void*)OSGetCurrentThread(), MEMPTR<void>(OSGetCurrentThread()).GetMPTR(), (uint32)prevCount, _l5WaitLR, _l5WaitIP); // Layer 5 TEMP (diagnostic)
 		}
 	}
 
@@ -440,7 +446,13 @@ namespace coreinit
 		// host threads during launch). Guard it exactly like coreinit_Thread.cpp does and report
 		// 0xFF (= host / no guest core) in that case. OSGetCurrentThread() is already null-safe.
 		const uint32 _l5SigCore = PPCInterpreter_getCurrentInstance() ? (uint32)OSGetCoreId() : 0xFFu;
-		GX2::NoteSemaphoreSignal(MEMPTR<OSSemaphore>(semaphore).GetMPTR(), MEMPTR<void>(OSGetCurrentThread()).GetMPTR(), _l5SigCore, (uint32)prevCount, semaphore->threadQueue.isEmpty() ? 0u : 1u);
+		// Layer 5b TEMP (diagnostic, register reads only): the signaler's guest call site. LR is the guest
+		// return address into the function that called OSSignalSemaphore; IP is the HLE call instruction.
+		// 0 => host-thread signaler (no PPC instance), as for _l5SigCore.
+		PPCInterpreter_t* _l5SigCPU = PPCInterpreter_getCurrentInstance();
+		const uint32 _l5SigIP = _l5SigCPU ? _l5SigCPU->instructionPointer : 0u;
+		const uint32 _l5SigLR = _l5SigCPU ? _l5SigCPU->spr.LR : 0u;
+		GX2::NoteSemaphoreSignal(MEMPTR<OSSemaphore>(semaphore).GetMPTR(), MEMPTR<void>(OSGetCurrentThread()).GetMPTR(), _l5SigCore, (uint32)prevCount, semaphore->threadQueue.isEmpty() ? 0u : 1u, _l5SigLR, _l5SigIP);
 		semaphore->threadQueue.wakeupEntireWaitQueue(reschedule);
 		return prevCount;
 	}

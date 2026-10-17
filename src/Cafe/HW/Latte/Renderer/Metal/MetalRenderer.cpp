@@ -1188,11 +1188,11 @@ void MetalRenderer::AppendOverlayDebugInfo()
                     break;
                 }
                 ImGui::Text("    ID/addr: 0x%08X  Waiter: 0x%08X  prevCount@wait: %d", l5ProdAddr, gft.prevProdSemThread.load(std::memory_order_relaxed), (sint32)gft.prevProdSemPrevCount.load(std::memory_order_relaxed));
-                ImGui::Text("    Wait: %.2f ms", l5WaitMs);
+                ImGui::Text("    Wait: %.2f ms  (caller LR 0x%08X)", l5WaitMs, gft.prevProdSemWaitLR.load(std::memory_order_relaxed));
                 if (l5Sig != 0)
                 {
                     ImGui::Text("    Signal: %.2f ms (after wait start)  Signal->wake: %.2f ms", PPCTimer_tscToMicroseconds(l5Sig - l5WS) / 1000.0, PPCTimer_tscToMicroseconds(l5WE - l5Sig) / 1000.0);
-                    ImGui::Text("    Signaler: 0x%08X core %u", gft.prevProdSemSignalThread.load(std::memory_order_relaxed), gft.prevProdSemSignalCore.load(std::memory_order_relaxed));
+                    ImGui::Text("    Signaler: 0x%08X core %u  (caller LR 0x%08X)", gft.prevProdSemSignalThread.load(std::memory_order_relaxed), gft.prevProdSemSignalCore.load(std::memory_order_relaxed), gft.prevProdSemSignalLR.load(std::memory_order_relaxed));
                 }
                 else
                 {

@@ -155,6 +155,13 @@ namespace GX2
 		std::atomic<uint32> lastSemSignalCore[kSemSlots]{};
 		std::atomic<uint32> lastSemSignalPrevCount[kSemSlots]{};
 		std::atomic<uint32> lastSemSignalHadWaiters[kSemSlots]{};
+		// Layer 5b: guest call site of the signaler (persistent per slot, written on any core). LR is the
+		// guest return address into the function that called OSSignalSemaphore (i.e. the call site); IP is
+		// the guest instruction pointer at the hook. Plain register reads captured in the hook -- no guest
+		// memory is dereferenced (safe even if the thread object is later freed). 0 when the signal came
+		// from a host thread with no PPC instance.
+		std::atomic<uint32> lastSemSignalLR[kSemSlots]{};
+		std::atomic<uint32> lastSemSignalIP[kSemSlots]{};
 		// producer's longest semaphore wait this frame (single-writer on the main core)
 		std::atomic<uint32> curProdSemAddr{0};
 		std::atomic<uint32> curProdSemThread{0};
@@ -164,6 +171,13 @@ namespace GX2
 		std::atomic<uint64> curProdSemSignalTsc{0};             // 0 = no signal landed in the wait window
 		std::atomic<uint32> curProdSemSignalThread{0};
 		std::atomic<uint32> curProdSemSignalCore{0};
+		// Layer 5b: guest call sites for the producer's longest wait (register reads only). LR is the guest
+		// return address into the function that called OSWaitSemaphore / OSSignalSemaphore; IP is the guest
+		// instruction pointer at the hook. 0 when unavailable (host-thread signalers, toggle off).
+		std::atomic<uint32> curProdSemWaitLR{0};
+		std::atomic<uint32> curProdSemWaitIP{0};
+		std::atomic<uint32> curProdSemSignalLR{0};
+		std::atomic<uint32> curProdSemSignalIP{0};
 
 		// --- published snapshot of the last COMPLETED guest frame; read by the overlay (Latte thread) ---
 		std::atomic<uint64> prevFrameSpanTsc{0};
@@ -196,6 +210,10 @@ namespace GX2
 		std::atomic<uint64> prevProdSemSignalTsc{0};
 		std::atomic<uint32> prevProdSemSignalThread{0};
 		std::atomic<uint32> prevProdSemSignalCore{0};
+		std::atomic<uint32> prevProdSemWaitLR{0};
+		std::atomic<uint32> prevProdSemWaitIP{0};
+		std::atomic<uint32> prevProdSemSignalLR{0};
+		std::atomic<uint32> prevProdSemSignalIP{0};
 		std::atomic<uint32> prevValid{0};
 
 		// Layer 3: handle of the thread that drives GX2SwapScanBuffers on the main core (critical path).
@@ -291,7 +309,8 @@ namespace GX2
 	// Blocking wait just returned. [startTsc,endTsc] bracket the queueAndWait. Main-core gated like
 	// the Layer-2/3/4 accumulators. thread is the host OSThread_t* (compared to producerThread like
 	// Layer 3); threadMPTR is the numeric id for display. prevCount is the count when we chose to block.
-	inline void NoteSemaphoreWait(uint32 semAddr, uint64 startTsc, uint64 endTsc, void* thread, uint32 threadMPTR, uint32 prevCount)
+	// callerLR/callerIP (Layer 5b, optional; pass 0 when unavailable) name the guest call site.
+	inline void NoteSemaphoreWait(uint32 semAddr, uint64 startTsc, uint64 endTsc, void* thread, uint32 threadMPTR, uint32 prevCount, uint32 callerLR = 0, uint32 callerIP = 0)
 	{
 		if (coreinit::OSGetCoreId() != (sint32)sGX2MainCoreIndex)
 			return;
@@ -311,6 +330,8 @@ namespace GX2
 				s.curProdSemWaitStartTsc.store(startTsc, std::memory_order_relaxed);
 				s.curProdSemWaitEndTsc.store(endTsc, std::memory_order_relaxed);
 				s.curProdSemPrevCount.store(prevCount, std::memory_order_relaxed);
+				s.curProdSemWaitLR.store(callerLR, std::memory_order_relaxed);
+				s.curProdSemWaitIP.store(callerIP, std::memory_order_relaxed);
 				// Match the most recent signal of THIS semaphore if it landed inside the wait window.
 				const uint64 sig = s.lastSemSignalTsc[i].load(std::memory_order_relaxed);
 				if (sig >= startTsc && sig <= endTsc)
@@ -318,12 +339,16 @@ namespace GX2
 					s.curProdSemSignalTsc.store(sig, std::memory_order_relaxed);
 					s.curProdSemSignalThread.store(s.lastSemSignalThread[i].load(std::memory_order_relaxed), std::memory_order_relaxed);
 					s.curProdSemSignalCore.store(s.lastSemSignalCore[i].load(std::memory_order_relaxed), std::memory_order_relaxed);
+					s.curProdSemSignalLR.store(s.lastSemSignalLR[i].load(std::memory_order_relaxed), std::memory_order_relaxed);
+					s.curProdSemSignalIP.store(s.lastSemSignalIP[i].load(std::memory_order_relaxed), std::memory_order_relaxed);
 				}
 				else
 				{
 					s.curProdSemSignalTsc.store(0, std::memory_order_relaxed);
 					s.curProdSemSignalThread.store(0, std::memory_order_relaxed);
 					s.curProdSemSignalCore.store(0, std::memory_order_relaxed);
+					s.curProdSemSignalLR.store(0, std::memory_order_relaxed);
+					s.curProdSemSignalIP.store(0, std::memory_order_relaxed);
 				}
 			}
 		}
@@ -331,8 +356,9 @@ namespace GX2
 
 	// Signal/post. NOT main-core gated — the signaler is exactly what we want to identify and may run
 	// on any core. Records identity + timestamp just BEFORE the (unchanged) wakeup. Relaxed atomics:
-	// diagnostic only; a signal racing the main-core publish is benign.
-	inline void NoteSemaphoreSignal(uint32 semAddr, uint32 signalerMPTR, uint32 core, uint32 prevCount, uint32 hadWaiters)
+	// diagnostic only; a signal racing the main-core publish is benign. callerLR/callerIP (Layer 5b,
+	// optional; pass 0 when unavailable) are the signaler's guest call site (register reads only).
+	inline void NoteSemaphoreSignal(uint32 semAddr, uint32 signalerMPTR, uint32 core, uint32 prevCount, uint32 hadWaiters, uint32 callerLR = 0, uint32 callerIP = 0)
 	{
 		GuestFrameTimingState& s = GetGuestFrameTiming();
 		const sint32 i = Layer5_SemSlotFindOrClaim(s, semAddr);
@@ -343,6 +369,8 @@ namespace GX2
 		s.lastSemSignalCore[i].store(core, std::memory_order_relaxed);
 		s.lastSemSignalPrevCount[i].store(prevCount, std::memory_order_relaxed);
 		s.lastSemSignalHadWaiters[i].store(hadWaiters, std::memory_order_relaxed);
+		s.lastSemSignalLR[i].store(callerLR, std::memory_order_relaxed);
+		s.lastSemSignalIP[i].store(callerIP, std::memory_order_relaxed);
 	}
 
 	inline void PublishGuestFrameAtMainCoreSwap()
@@ -386,6 +414,10 @@ namespace GX2
 			s.prevProdSemSignalTsc.store(s.curProdSemSignalTsc.load(std::memory_order_relaxed), std::memory_order_relaxed);
 			s.prevProdSemSignalThread.store(s.curProdSemSignalThread.load(std::memory_order_relaxed), std::memory_order_relaxed);
 			s.prevProdSemSignalCore.store(s.curProdSemSignalCore.load(std::memory_order_relaxed), std::memory_order_relaxed);
+			s.prevProdSemWaitLR.store(s.curProdSemWaitLR.load(std::memory_order_relaxed), std::memory_order_relaxed);
+			s.prevProdSemWaitIP.store(s.curProdSemWaitIP.load(std::memory_order_relaxed), std::memory_order_relaxed);
+			s.prevProdSemSignalLR.store(s.curProdSemSignalLR.load(std::memory_order_relaxed), std::memory_order_relaxed);
+			s.prevProdSemSignalIP.store(s.curProdSemSignalIP.load(std::memory_order_relaxed), std::memory_order_relaxed);
 			s.prevValid.store(1, std::memory_order_relaxed);
 		}
 		s.curGpuRetireWaitTsc.store(0, std::memory_order_relaxed);
@@ -420,6 +452,10 @@ namespace GX2
 		s.curProdSemSignalTsc.store(0, std::memory_order_relaxed);
 		s.curProdSemSignalThread.store(0, std::memory_order_relaxed);
 		s.curProdSemSignalCore.store(0, std::memory_order_relaxed);
+		s.curProdSemWaitLR.store(0, std::memory_order_relaxed);
+		s.curProdSemWaitIP.store(0, std::memory_order_relaxed);
+		s.curProdSemSignalLR.store(0, std::memory_order_relaxed);
+		s.curProdSemSignalIP.store(0, std::memory_order_relaxed);
 		s.curFrameStartTsc.store(now, std::memory_order_relaxed);
 	}
 }
