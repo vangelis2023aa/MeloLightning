@@ -1062,15 +1062,17 @@ void MetalRenderer::AppendOverlayDebugInfo()
         ImGui::Text("  [submit split - overlay on]");
         ImGui::Text("  beginSequence (per pass)   %.2f ms", beginSeqMs);
         ImGui::Text("  index decode               %.2f ms", dcIndexMs);
-        ImGui::Text("  buffer/uniform sync        %.2f ms", bufSyncMs);
+        ImGui::Text("  buffer/uniform sync        %.2f ms   [sibling of bindStage, NOT inside it]", bufSyncMs);
         ImGui::Text("  pipeline hash+lookup       %.2f ms", pipelineMs);
         ImGui::Text("  bindStage TOTAL            %.2f ms", bindStageMs);
         ImGui::Text("    - arg-buffer encode      %.2f ms", argEncodeMs);
-        ImGui::Text("    - residency declare      %.2f ms", residencyMs);
+        ImGui::Text("    - residency declare      %.2f ms   [nested inside tex/support sections]", residencyMs);
         ImGui::Text("    - support/uniform/tex    %.2f ms", bindRemainderMs);
+        ImGui::Text("       (disjoint sections of bindStage; sum + argEncode = TOTAL)");
         ImGui::Text("        . texture/sampler    %.2f ms", bindTexMs);
         ImGui::Text("        . support buffer     %.2f ms", bindSupportMs);
         ImGui::Text("        . uniform/storage    %.2f ms", bindUniformMs);
+        ImGui::Text("        . sections sum       %.2f ms  (vs TOTAL %.2f)", bindTexMs + bindSupportMs + bindUniformMs, bindStageMs);
         ImGui::Text("  draw emit                  %.2f ms", drawEmitMs);
         ImGui::Text("  accounted sum              %.2f ms", dcAccountedMs);
     }
